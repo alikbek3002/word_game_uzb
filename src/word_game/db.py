@@ -3,7 +3,7 @@ import re
 import sqlite3
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from config import get_settings
+from .config import get_settings
 
 try:
     import psycopg

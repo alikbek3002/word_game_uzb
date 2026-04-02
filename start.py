@@ -1,4 +1,4 @@
-from config import get_settings
+from src.word_game.config import get_settings
 
 
 def main():
@@ -6,13 +6,13 @@ def main():
     role = settings.app_role
 
     if role == "admin":
-        from admin_bot import main as run_admin
+        from src.word_game.admin_bot import main as run_admin
 
         run_admin()
         return
 
     if role == "user":
-        from user_bot import main as run_user
+        from src.word_game.user_bot import main as run_user
 
         run_user()
         return

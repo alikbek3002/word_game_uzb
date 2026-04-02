@@ -8,7 +8,7 @@ DATABASE_URL=postgresql://... python migrate_sqlite_to_postgres.py
 import os
 import sqlite3
 
-from db import IS_POSTGRES, init_db
+from src.word_game.db import IS_POSTGRES, init_db
 
 try:
     import psycopg

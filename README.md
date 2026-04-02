@@ -1,10 +1,36 @@
 # Find Stranger Bots
 
-Два Telegram-бота для игры "Найди незнакомца":
+Telegram-проект для игры "Найди незнакомца" с двумя ботами:
 - пользовательский бот
 - отдельный админ-бот
 
 Оба сервиса используют одну и ту же базу данных. Локально можно работать через `SQLite`, а на Railway проект автоматически использует Postgres через `DATABASE_URL`.
+
+## Структура проекта
+
+```text
+.
+├── src/
+│   └── word_game/
+│       ├── admin_bot.py
+│       ├── config.py
+│       ├── db.py
+│       ├── keyboards.py
+│       └── user_bot.py
+├── scripts/
+│   └── migrate_sqlite_to_postgres.py
+├── .env.example
+├── .gitignore
+├── README.md
+├── admin_bot.py
+├── find_stranger_bot.py
+├── railway.json
+├── requirements.txt
+├── start.py
+└── user_bot.py
+```
+
+`src/word_game/` содержит весь основной код. В корне оставлены только удобные точки входа и конфиги для Railway/GitHub.
 
 ## Локальный запуск
 
@@ -108,7 +134,7 @@ ADMIN_IDS=123456789,987654321
 
 ```bash
 export DATABASE_URL="postgresql://..."
-python migrate_sqlite_to_postgres.py
+python scripts/migrate_sqlite_to_postgres.py
 ```
 
 Если файл SQLite лежит в другом месте:
@@ -116,5 +142,5 @@ python migrate_sqlite_to_postgres.py
 ```bash
 export SQLITE_PATH="/path/to/find_stranger.db"
 export DATABASE_URL="postgresql://..."
-python migrate_sqlite_to_postgres.py
+python scripts/migrate_sqlite_to_postgres.py
 ```
