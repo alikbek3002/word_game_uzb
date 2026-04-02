@@ -57,6 +57,12 @@ python admin_bot.py
 
 ## Railway
 
+Рекомендую деплоить через отдельные директории сервисов:
+- `services/user` для обычного бота
+- `services/admin` для админ-бота
+
+Так в Railway сразу видно, где какой сервис, и не нужно различать их через одинаковый `Start Command`.
+
 ### Что создать
 
 Нужны:
@@ -66,40 +72,44 @@ python admin_bot.py
 
 Оба Python-сервиса можно создать из одного и того же репозитория.
 
-### Общая логика запуска
+### Переменные для user service
 
-В проекте есть единый entrypoint `start.py`. Он смотрит на переменную `APP_ROLE`:
-- `APP_ROLE=user` запускает пользовательского бота
-- `APP_ROLE=admin` запускает админ-бота
+`Root Directory`:
 
-`railway.json` уже настроен на:
+```text
+services/user
+```
+
+Старт будет таким:
 
 ```bash
 python start.py
 ```
 
-### Переменные для user service
-
 Обязательно:
 
 ```bash
-APP_ROLE=user
 USER_BOT_TOKEN=...
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 ```
 
-Опционально:
+### Переменные для admin service
 
-```bash
-BOT_TOKEN=...
+`Root Directory`:
+
+```text
+services/admin
 ```
 
-### Переменные для admin service
+Старт будет таким:
+
+```bash
+python start.py
+```
 
 Обязательно:
 
 ```bash
-APP_ROLE=admin
 ADMIN_BOT_TOKEN=...
 ADMIN_IDS=123456789
 DATABASE_URL=${{Postgres.DATABASE_URL}}
@@ -116,10 +126,10 @@ ADMIN_IDS=123456789,987654321
 1. Заливаешь этот проект в GitHub.
 2. Подключаешь репозиторий к Railway.
 3. Создаёшь Postgres service.
-4. Создаёшь первый Python service для user-бота.
-5. Создаёшь второй Python service для admin-бота.
+4. Создаёшь первый Python service для user-бота с `Root Directory = services/user`.
+5. Создаёшь второй Python service для admin-бота с `Root Directory = services/admin`.
 6. Оба сервиса подключаешь к одному Postgres.
-7. Для каждого сервиса выставляешь свой `APP_ROLE`.
+7. Для каждого сервиса выставляешь свои env-переменные.
 
 ### Что важно
 
