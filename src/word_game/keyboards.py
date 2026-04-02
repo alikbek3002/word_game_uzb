@@ -18,6 +18,7 @@ BTN_ADMIN_STATS = "📊 Сводка"
 BTN_ADMIN_TOP10 = "🏆 Топ-10 лидеров"
 BTN_ADMIN_RECENT_FINDS = "🕒 Последние находки"
 BTN_ADMIN_RECENT_USERS = "👥 Новые участники"
+BTN_ADMIN_BROADCAST = "📣 Рассылка всем"
 
 
 def guest_menu() -> ReplyKeyboardMarkup:
@@ -72,6 +73,15 @@ def admin_menu() -> ReplyKeyboardMarkup:
         [
             [BTN_ADMIN_STATS, BTN_ADMIN_TOP10],
             [BTN_ADMIN_RECENT_FINDS, BTN_ADMIN_RECENT_USERS],
+            [BTN_ADMIN_BROADCAST],
         ],
         resize_keyboard=True,
+    )
+
+
+def admin_broadcast_menu() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[BTN_CANCEL]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
     )

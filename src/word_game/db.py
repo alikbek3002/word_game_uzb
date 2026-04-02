@@ -152,6 +152,19 @@ def init_db():
             )
             """
         )
+        _execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_subscribers (
+                telegram_id BIGINT PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                status TEXT DEFAULT 'active',
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
     else:
         _execute(
             """
@@ -178,10 +191,29 @@ def init_db():
             )
             """
         )
+        _execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_subscribers (
+                telegram_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                status TEXT DEFAULT 'active',
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
 
     _ensure_column("users", "normalized_phone", "TEXT")
     _ensure_column("users", "username", "TEXT")
     _ensure_column("users", "status", "TEXT DEFAULT 'active'")
+    _ensure_column("admin_subscribers", "username", "TEXT")
+    _ensure_column("admin_subscribers", "first_name", "TEXT")
+    _ensure_column("admin_subscribers", "last_name", "TEXT")
+    _ensure_column("admin_subscribers", "status", "TEXT DEFAULT 'active'")
+    _ensure_column("admin_subscribers", "joined_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+    _ensure_column("admin_subscribers", "last_seen_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
 
     if IS_POSTGRES:
         rows = _fetch_all(
@@ -216,6 +248,12 @@ def init_db():
             ON found(finder_telegram_id)
             """
         )
+        _execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_admin_subscribers_status
+            ON admin_subscribers(status, joined_at ASC)
+            """
+        )
         return
 
     rows = _fetch_all("SELECT telegram_id, phone, normalized_phone, status FROM users")
@@ -246,6 +284,12 @@ def init_db():
         """
         CREATE INDEX IF NOT EXISTS idx_found_finder
         ON found(finder_telegram_id)
+        """
+    )
+    _execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_admin_subscribers_status
+        ON admin_subscribers(status, joined_at ASC)
         """
     )
 
@@ -481,11 +525,15 @@ def get_admin_stats() -> dict:
     active_users = int(
         _fetch_value("SELECT COUNT(*) FROM users WHERE status = 'active'") or 0
     )
+    admin_subscribers = int(
+        _fetch_value("SELECT COUNT(*) FROM admin_subscribers WHERE status = 'active'") or 0
+    )
     total_finds = int(_fetch_value("SELECT COUNT(*) FROM found") or 0)
     top_score = int(_fetch_value("SELECT COALESCE(MAX(score), 0) FROM users") or 0)
     return {
         "users_total": users_total,
         "active_users": active_users,
+        "admin_subscribers": admin_subscribers,
         "total_finds": total_finds,
         "top_score": top_score,
     }
@@ -545,3 +593,77 @@ def get_recent_users(limit: int = 10) -> List[dict]:
         """,
         (limit,),
     )
+
+
+def get_broadcast_recipients() -> List[int]:
+    rows = _fetch_all(
+        """
+        SELECT telegram_id
+        FROM users
+        WHERE status = 'active'
+        ORDER BY registered_at ASC
+        """
+    )
+    return [int(row["telegram_id"]) for row in rows]
+
+
+def upsert_admin_subscriber(
+    telegram_id: int,
+    username: Optional[str],
+    first_name: Optional[str],
+    last_name: Optional[str],
+):
+    if IS_POSTGRES:
+        _execute(
+            """
+            INSERT INTO admin_subscribers (
+                telegram_id, username, first_name, last_name, status, last_seen_at
+            )
+            VALUES (%s, %s, %s, %s, 'active', CURRENT_TIMESTAMP)
+            ON CONFLICT (telegram_id) DO UPDATE SET
+                username = EXCLUDED.username,
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                status = 'active',
+                last_seen_at = CURRENT_TIMESTAMP
+            """,
+            (telegram_id, username, first_name, last_name),
+        )
+        return
+
+    _execute(
+        """
+        INSERT INTO admin_subscribers (
+            telegram_id, username, first_name, last_name, status, last_seen_at
+        )
+        VALUES (?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)
+        ON CONFLICT(telegram_id) DO UPDATE SET
+            username = excluded.username,
+            first_name = excluded.first_name,
+            last_name = excluded.last_name,
+            status = 'active',
+            last_seen_at = CURRENT_TIMESTAMP
+        """,
+        (telegram_id, username, first_name, last_name),
+    )
+
+
+def set_admin_subscriber_status(telegram_id: int, status: str):
+    query = (
+        "UPDATE admin_subscribers SET status = %s, last_seen_at = CURRENT_TIMESTAMP WHERE telegram_id = %s"
+        if IS_POSTGRES
+        else "UPDATE admin_subscribers SET status = ?, last_seen_at = CURRENT_TIMESTAMP WHERE telegram_id = ?"
+    )
+    _execute(query, (status, telegram_id))
+
+
+def get_admin_broadcast_recipients() -> List[int]:
+    rows = _fetch_all(
+        """
+        SELECT telegram_id
+        FROM admin_subscribers
+        WHERE status = 'active'
+        ORDER BY joined_at ASC
+        """
+    )
+    return [int(row["telegram_id"]) for row in rows]
