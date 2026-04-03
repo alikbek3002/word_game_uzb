@@ -58,6 +58,8 @@ python admin_bot.py
 
 Деплой делай только из корня репозитория.
 
+Проект зафиксирован на Python `3.12.12` через [`.python-version`](/Users/alikbekmukanbetov/Desktop/Word%20Class%20Uzb/.python-version), потому что `python-telegram-bot==20.8` у Railway на Python 3.13 может падать при старте.
+
 `Root Directory`:
 
 ```text
