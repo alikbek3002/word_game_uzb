@@ -23,7 +23,7 @@ from telegram.ext import (
     filters,
 )
 
-from .config import require_token
+from .config import get_settings, require_token
 from .db import (
     get_admin_stats,
     get_admin_broadcast_recipients,
