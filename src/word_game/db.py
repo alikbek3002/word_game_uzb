@@ -1,6 +1,7 @@
 import random
 import re
 import sqlite3
+import time
 import zlib
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -51,7 +52,20 @@ def _worker_lock_key(lock_name: str) -> int:
     return zlib.crc32(lock_name.encode("utf-8")) & 0x7FFFFFFF
 
 
-def acquire_worker_lock(lock_name: str) -> bool:
+def _read_lock_result(row: Any) -> bool:
+    if row is None:
+        return False
+    if isinstance(row, dict):
+        return bool(row["acquired"])
+    return bool(row[0])
+
+
+def acquire_worker_lock(
+    lock_name: str,
+    wait: bool = True,
+    timeout_seconds: int = 180,
+    retry_interval_seconds: float = 2.0,
+) -> bool:
     if not IS_POSTGRES:
         return True
 
@@ -61,30 +75,33 @@ def acquire_worker_lock(lock_name: str) -> bool:
     if psycopg is None:
         raise RuntimeError("Для worker lock нужен установленный psycopg.")
 
-    conn = psycopg.connect(DATABASE_URL, autocommit=True)
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "SELECT pg_try_advisory_lock(%s) AS acquired",
-                (_worker_lock_key(lock_name),),
-            )
-            row = cursor.fetchone()
-            if row is None:
-                acquired = False
-            elif isinstance(row, dict):
-                acquired = bool(row["acquired"])
-            else:
-                acquired = bool(row[0])
-    except Exception:
-        conn.close()
-        raise
+    started_at = time.monotonic()
 
-    if not acquired:
-        conn.close()
-        return False
+    while True:
+        conn = psycopg.connect(DATABASE_URL, autocommit=True)
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT pg_try_advisory_lock(%s) AS acquired",
+                    (_worker_lock_key(lock_name),),
+                )
+                acquired = _read_lock_result(cursor.fetchone())
+        except Exception:
+            conn.close()
+            raise
 
-    _LOCK_CONNECTIONS[lock_name] = conn
-    return True
+        if acquired:
+            _LOCK_CONNECTIONS[lock_name] = conn
+            return True
+
+        conn.close()
+        if not wait:
+            return False
+
+        if time.monotonic() - started_at >= timeout_seconds:
+            return False
+
+        time.sleep(retry_interval_seconds)
 
 
 def release_worker_lock(lock_name: str):

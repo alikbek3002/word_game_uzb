@@ -707,10 +707,11 @@ def build_application() -> Application:
 
 def main():
     init_db()
+    logger.info("Пытаюсь получить lock для админ-бота...")
     if not acquire_worker_lock(ADMIN_LOCK_NAME):
         logger.error(
-            "Админ-бот уже запущен в другом инстансе с этой же базой. "
-            "Останавливаю текущий процесс, чтобы не словить двойной polling."
+            "Не удалось получить lock для админ-бота. "
+            "Скорее всего, другой инстанс всё ещё не освободил его после деплоя."
         )
         return
 
