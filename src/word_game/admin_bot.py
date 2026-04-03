@@ -30,6 +30,7 @@ from .db import (
     delete_user_and_cleanup,
     get_admin_stats,
     get_admin_broadcast_recipients,
+    get_all_users_for_admin,
     get_broadcast_recipients,
     get_leaderboard,
     get_recent_finds,
@@ -397,12 +398,48 @@ def format_user_match(row: dict) -> str:
     )
 
 
+async def send_user_list(update: Update, rows: list[dict]):
+    if not rows:
+        await update.message.reply_text(
+            "Список пользователей пуст.",
+            reply_markup=admin_menu(),
+        )
+        return
+
+    header = "👥 Все пользователи:\n\n"
+    chunk = header
+    chunk_count = 0
+
+    for index, row in enumerate(rows, start=1):
+        line = f"{index}. {format_user_match(row)}\n"
+        if len(chunk) + len(line) > 3500 and chunk_count > 0:
+            await update.message.reply_text(chunk.rstrip(), reply_markup=admin_menu())
+            chunk = header
+            chunk_count = 0
+
+        chunk += line
+        chunk_count += 1
+
+    if chunk_count > 0:
+        await update.message.reply_text(chunk.rstrip(), reply_markup=admin_menu())
+
+
 async def start_delete_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop(DELETE_CANDIDATE_KEY, None)
+    users = get_all_users_for_admin()
+    if not users:
+        await update.message.reply_text(
+            "В базе сейчас нет пользователей для удаления.",
+            reply_markup=admin_menu(),
+        )
+        return ConversationHandler.END
+
+    await send_user_list(update, users)
     await update.message.reply_text(
         "🗑 Режим удаления пользователя.\n\n"
-        "Пришли Telegram ID, @username или часть имени.\n"
-        "Я найду совпадения и попрошу подтвердить удаление.",
+        "Выше я показал список всех пользователей.\n"
+        "Теперь пришли точный Telegram ID, @username или часть имени.\n"
+        "Если совпадение будет одно, я попрошу подтвердить удаление.",
         reply_markup=admin_broadcast_menu(),
     )
     return WAITING_DELETE_QUERY

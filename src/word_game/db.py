@@ -714,6 +714,31 @@ def get_recent_users(limit: int = 10) -> List[dict]:
     )
 
 
+def get_all_users_for_admin() -> List[dict]:
+    if IS_POSTGRES:
+        return _fetch_all(
+            """
+            SELECT telegram_id, name, username, score, status, registered_at
+            FROM users
+            ORDER BY
+                CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+                registered_at DESC,
+                LOWER(name) ASC
+            """
+        )
+
+    return _fetch_all(
+        """
+        SELECT telegram_id, name, username, score, status, registered_at
+        FROM users
+        ORDER BY
+            CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+            registered_at DESC,
+            name COLLATE NOCASE ASC
+        """
+    )
+
+
 def search_users_for_admin(query: str, limit: int = 10) -> List[dict]:
     cleaned_query = (query or "").strip()
     if not cleaned_query:
