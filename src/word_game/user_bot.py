@@ -59,6 +59,8 @@ from .keyboards import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 ASK_NAME, ASK_PHONE, ASK_PHOTO, WAITING_PHONE_GUESS, EDIT_NAME, EDIT_PHONE, EDIT_PHOTO = range(7)
 
