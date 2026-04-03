@@ -9,7 +9,7 @@ class Settings:
     database_url: Optional[str]
     user_bot_token: Optional[str]
     admin_bot_token: Optional[str]
-    app_role: str
+    app_role: Optional[str]
 
 
 def get_settings() -> Settings:
@@ -18,7 +18,7 @@ def get_settings() -> Settings:
         database_url=os.getenv("DATABASE_URL"),
         user_bot_token=os.getenv("USER_BOT_TOKEN") or os.getenv("BOT_TOKEN"),
         admin_bot_token=os.getenv("ADMIN_BOT_TOKEN"),
-        app_role=(os.getenv("APP_ROLE", "user").strip().lower() or "user"),
+        app_role=(os.getenv("APP_ROLE", "").strip().lower() or None),
     )
 
 

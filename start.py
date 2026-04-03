@@ -1,9 +1,31 @@
 from src.word_game.config import get_settings
 
 
-def main():
+def detect_role():
     settings = get_settings()
-    role = settings.app_role
+
+    if settings.app_role in {"user", "admin"}:
+        return settings.app_role
+
+    if settings.user_bot_token and not settings.admin_bot_token:
+        return "user"
+
+    if settings.admin_bot_token and not settings.user_bot_token:
+        return "admin"
+
+    if settings.user_bot_token and settings.admin_bot_token:
+        raise RuntimeError(
+            "Найдены оба токена: USER_BOT_TOKEN и ADMIN_BOT_TOKEN. "
+            "Укажи APP_ROLE=user или APP_ROLE=admin."
+        )
+
+    raise RuntimeError(
+        "Не найден токен бота. Укажи USER_BOT_TOKEN или ADMIN_BOT_TOKEN."
+    )
+
+
+def main():
+    role = detect_role()
 
     if role == "admin":
         from src.word_game.admin_bot import main as run_admin
