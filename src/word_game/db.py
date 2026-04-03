@@ -68,7 +68,12 @@ def acquire_worker_lock(lock_name: str) -> bool:
                 (_worker_lock_key(lock_name),),
             )
             row = cursor.fetchone()
-            acquired = bool(row["acquired"])
+            if row is None:
+                acquired = False
+            elif isinstance(row, dict):
+                acquired = bool(row["acquired"])
+            else:
+                acquired = bool(row[0])
     except Exception:
         conn.close()
         raise
