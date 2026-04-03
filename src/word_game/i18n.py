@@ -55,6 +55,10 @@ BUTTONS: Dict[str, Dict[str, str]] = {
         "ru": "🔄 Другой участник",
         "uz": "🔄 Boshqa ishtirokchi",
     },
+    "later": {
+        "ru": "⏰ Позже",
+        "uz": "⏰ Keyinroq",
+    },
     "share_phone": {
         "ru": "📲 Отправить мой номер",
         "uz": "📲 Raqamimni yuborish",
@@ -92,9 +96,19 @@ TEXTS: Dict[str, Dict[str, str]] = {
             "Нажми кнопку ниже и бот сразу даст следующего участника."
         ),
         "return_intro": "👋 С возвращением!",
+        "registration_referral_intro": (
+            "🎁 Бонус на старте!\n\n"
+            "Если порекомендуешь World Class 5 друзьям, получишь +5 баллов.\n"
+            "Можно заполнить позже, для продолжения нажми кнопку «Позже»."
+        ),
+        "registration_referral_retry": (
+            "Чтобы продолжить регистрацию, нажми «Позже».\n"
+            "На шаге ниже нужно будет ввести своё имя."
+        ),
         "registration_intro": (
             "👋 Добро пожаловать в «Найди незнакомца»!\n\n"
-            "Сначала создадим твою карточку участника. Как тебя зовут?"
+            "Сначала создадим твою карточку участника.\n"
+            "✍️ Напиши своё имя текстом (например: Алина)."
         ),
         "help_text": (
             "Как это работает:\n"
@@ -203,9 +217,19 @@ TEXTS: Dict[str, Dict[str, str]] = {
             "Pastdagi tugmani bosing, bot sizga darhol keyingi ishtirokchini beradi."
         ),
         "return_intro": "👋 Yana ko'rganimdan xursandman!",
+        "registration_referral_intro": (
+            "🎁 Boshlanish bonus!\n\n"
+            "Agar World Class'ni 5 nafar do'stingizga tavsiya qilsangiz, +5 ball olasiz.\n"
+            "Buni keyinroq ham to'ldirishingiz mumkin, davom etish uchun «Keyinroq» tugmasini bosing."
+        ),
+        "registration_referral_retry": (
+            "Ro'yxatdan o'tishni davom ettirish uchun «Keyinroq» tugmasini bosing.\n"
+            "Keyingi bosqichda ismingizni yozasiz."
+        ),
         "registration_intro": (
             "👋 «Noma'lumni top» o'yiniga xush kelibsiz!\n\n"
-            "Avval sizning ishtirokchi kartangizni yaratamiz. Ismingiz nima?"
+            "Avval sizning ishtirokchi kartangizni yaratamiz.\n"
+            "✍️ Ismingizni matn ko'rinishida yozing (masalan: Aliya)."
         ),
         "help_text": (
             "Bu qanday ishlaydi:\n"

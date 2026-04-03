@@ -14,6 +14,7 @@ BTN_EDIT_PHOTO = "edit_photo"
 BTN_BACK = "back"
 BTN_CANCEL = "cancel"
 BTN_SKIP = "skip"
+BTN_LATER = "later"
 BTN_SHARE_PHONE = "share_phone"
 BTN_LANGUAGE = "language"
 BTN_LANG_RU = "lang_ru"
@@ -80,6 +81,17 @@ def photo_step_menu(language: str) -> ReplyKeyboardMarkup:
 def text_step_menu(language: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [[button_text(BTN_LANGUAGE, language), button_text(BTN_CANCEL, language)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def registration_offer_menu(language: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [button_text(BTN_LATER, language)],
+            [button_text(BTN_LANGUAGE, language), button_text(BTN_CANCEL, language)],
+        ],
         resize_keyboard=True,
         one_time_keyboard=True,
     )

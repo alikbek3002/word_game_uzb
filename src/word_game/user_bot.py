@@ -51,6 +51,7 @@ from .keyboards import (
     BTN_LANG_RU,
     BTN_LANG_UZ,
     BTN_LEADERBOARD,
+    BTN_LATER,
     BTN_PLAY,
     BTN_PROFILE,
     BTN_REGISTER,
@@ -64,6 +65,7 @@ from .keyboards import (
     phone_request_menu,
     photo_step_menu,
     profile_menu,
+    registration_offer_menu,
     text_step_menu,
 )
 
@@ -72,7 +74,7 @@ logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-CHOOSE_LANGUAGE, ASK_NAME, ASK_PHONE, ASK_PHOTO, WAITING_PHONE_GUESS, EDIT_NAME, EDIT_PHONE, EDIT_PHOTO = range(8)
+CHOOSE_LANGUAGE, ASK_REFERRAL, ASK_NAME, ASK_PHONE, ASK_PHOTO, WAITING_PHONE_GUESS, EDIT_NAME, EDIT_PHONE, EDIT_PHOTO = range(9)
 USER_LOCK_NAME = "word_game_user_bot"
 LANGUAGE_NEXT_STEP_KEY = "language_next_step"
 NAVIGATION_BUTTON_FILTER = (
@@ -240,10 +242,10 @@ async def choose_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reset_user_state(context)
         context.user_data["lang"] = language
         await update.message.reply_text(
-            t(language, "registration_intro"),
-            reply_markup=text_step_menu(language),
+            t(language, "registration_referral_intro"),
+            reply_markup=registration_offer_menu(language),
         )
-        return ASK_NAME
+        return ASK_REFERRAL
 
     if user:
         await send_registered_home(update, context, intro=t(language, "choose_language_updated"))
@@ -311,10 +313,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_user_state(context)
     context.user_data["lang"] = language
     await update.message.reply_text(
-        t(language, "registration_intro"),
-        reply_markup=text_step_menu(language),
+        t(language, "registration_referral_intro"),
+        reply_markup=registration_offer_menu(language),
     )
-    return ASK_NAME
+    return ASK_REFERRAL
+
+
+async def ask_referral_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    language = get_current_language(context)
+    text = update.message.text.strip()
+
+    if button_matches(text, BTN_LATER):
+        await update.message.reply_text(
+            t(language, "registration_intro"),
+            reply_markup=text_step_menu(language),
+        )
+        return ASK_NAME
+
+    await update.message.reply_text(
+        t(language, "registration_referral_retry"),
+        reply_markup=registration_offer_menu(language),
+    )
+    return ASK_REFERRAL
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -795,6 +815,11 @@ def build_application() -> Application:
         states={
             CHOOSE_LANGUAGE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, choose_language),
+            ],
+            ASK_REFERRAL: [
+                MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
+                MessageHandler(filters.Regex(button_pattern(BTN_LANGUAGE)), change_language_during_registration),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, ask_referral_choice),
             ],
             ASK_NAME: [
                 MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
