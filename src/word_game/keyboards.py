@@ -32,7 +32,7 @@ def guest_menu(language: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [button_text(BTN_REGISTER, language)],
-            [button_text(BTN_LANGUAGE, language), button_text(BTN_HELP, language)],
+            [button_text(BTN_HELP, language)],
         ],
         resize_keyboard=True,
     )
@@ -42,7 +42,7 @@ def main_menu(language: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [button_text(BTN_PLAY, language), button_text(BTN_PROFILE, language)],
-            [button_text(BTN_SCORE, language), button_text(BTN_LEADERBOARD, language)],
+            [button_text(BTN_SCORE, language)],
             [button_text(BTN_LANGUAGE, language), button_text(BTN_HELP, language)],
         ],
         resize_keyboard=True,
@@ -80,7 +80,7 @@ def photo_step_menu(language: str) -> ReplyKeyboardMarkup:
 
 def text_step_menu(language: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        [[button_text(BTN_LANGUAGE, language), button_text(BTN_CANCEL, language)]],
+        [[button_text(BTN_CANCEL, language)]],
         resize_keyboard=True,
         one_time_keyboard=True,
     )
@@ -90,7 +90,7 @@ def registration_offer_menu(language: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [button_text(BTN_LATER, language)],
-            [button_text(BTN_LANGUAGE, language), button_text(BTN_CANCEL, language)],
+            [button_text(BTN_CANCEL, language)],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,

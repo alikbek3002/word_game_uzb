@@ -327,7 +327,6 @@ COMMANDS: Dict[str, Dict[str, str]] = {
         "guess_who": "Получить следующего участника",
         "profile": "Показать профиль",
         "score": "Показать счёт",
-        "leaderboard": "Показать лидеров",
         "help": "Краткая помощь",
     },
     "uz": {
@@ -335,7 +334,6 @@ COMMANDS: Dict[str, Dict[str, str]] = {
         "guess_who": "Keyingi ishtirokchini olish",
         "profile": "Profilni ko'rsatish",
         "score": "Hisobni ko'rsatish",
-        "leaderboard": "Liderlarni ko'rsatish",
         "help": "Qisqa yordam",
     },
 }

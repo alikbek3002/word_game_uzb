@@ -50,7 +50,6 @@ from .keyboards import (
     BTN_LANGUAGE,
     BTN_LANG_RU,
     BTN_LANG_UZ,
-    BTN_LEADERBOARD,
     BTN_LATER,
     BTN_PLAY,
     BTN_PROFILE,
@@ -82,9 +81,7 @@ NAVIGATION_BUTTON_FILTER = (
     | filters.Regex(button_pattern(BTN_PLAY))
     | filters.Regex(button_pattern(BTN_PROFILE))
     | filters.Regex(button_pattern(BTN_SCORE))
-    | filters.Regex(button_pattern(BTN_LEADERBOARD))
     | filters.Regex(button_pattern(BTN_HELP))
-    | filters.Regex(button_pattern(BTN_LANGUAGE))
     | filters.Regex(button_pattern(BTN_BACK))
 )
 
@@ -444,13 +441,14 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sync_username(update, user)
     progress = get_progress(update.effective_user.id)
     username = f"@{user['username']}" if user.get("username") else t(language, "username_missing")
-    await update.message.reply_text(
-        t(
+    await update.message.reply_photo(
+        photo=user["photo_file_id"],
+        caption=t(
             language,
             "profile_text",
             name=user["name"],
             username=username,
-            phone=mask_phone(user["phone"]),
+            phone=user["phone"],
             score=user["score"],
             found_count=progress["found_count"],
         ),
@@ -724,21 +722,17 @@ async def back_to_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
-    if user:
-        language = get_current_language(context, user)
-        context.user_data["lang"] = language
-        return await show_language_picker(update, context, next_step="home", include_cancel=True)
+    if not user:
+        language = get_current_language(context)
+        await update.message.reply_text(
+            t(language, "register_first"),
+            reply_markup=guest_menu(language),
+        )
+        return
 
-    if not normalize_language(context.user_data.get("lang")):
-        return await show_language_picker(update, context, next_step="register", include_cancel=False)
-
-    language = get_current_language(context)
+    language = get_current_language(context, user)
     context.user_data["lang"] = language
-    return await show_language_picker(update, context, next_step="guest", include_cancel=True)
-
-
-async def change_language_during_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await show_language_picker(update, context, next_step="register", include_cancel=True)
+    return await show_language_picker(update, context, next_step="home", include_cancel=True)
 
 
 async def handle_navigation_during_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -760,8 +754,6 @@ async def route_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return await profile(update, context)
     if button_matches(text, BTN_SCORE):
         return await score(update, context)
-    if button_matches(text, BTN_LEADERBOARD):
-        return await leaderboard(update, context)
     if button_matches(text, BTN_HELP):
         return await help_command(update, context)
     if button_matches(text, BTN_LANGUAGE):
@@ -810,7 +802,6 @@ def build_application() -> Application:
         entry_points=[
             CommandHandler("start", start),
             MessageHandler(filters.Regex(button_pattern(BTN_REGISTER)), start),
-            MessageHandler(filters.Regex(button_pattern(BTN_LANGUAGE)), start_language_selection),
         ],
         states={
             CHOOSE_LANGUAGE: [
@@ -818,12 +809,10 @@ def build_application() -> Application:
             ],
             ASK_REFERRAL: [
                 MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
-                MessageHandler(filters.Regex(button_pattern(BTN_LANGUAGE)), change_language_during_registration),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ask_referral_choice),
             ],
             ASK_NAME: [
                 MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
-                MessageHandler(filters.Regex(button_pattern(BTN_LANGUAGE)), change_language_during_registration),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name),
             ],
             ASK_PHONE: [
@@ -894,7 +883,6 @@ def build_application() -> Application:
     application.add_handler(edit_handler)
     application.add_handler(CommandHandler("profile", profile))
     application.add_handler(CommandHandler("score", score))
-    application.add_handler(CommandHandler("leaderboard", leaderboard))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.Regex(button_pattern(BTN_BACK)), back_to_menu))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, route_menu_buttons))
