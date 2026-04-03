@@ -3,6 +3,7 @@
 
 Переменные окружения:
 - ADMIN_BOT_TOKEN
+- USER_BOT_TOKEN (опционально, для рассылки игрокам user-бота)
 - DB_PATH (опционально)
 """
 
@@ -13,7 +14,7 @@ from io import BytesIO
 from typing import Optional, Tuple
 
 from telegram import Bot, BotCommand, InputFile, Message, Update
-from telegram.error import Forbidden, RetryAfter, TelegramError
+from telegram.error import Conflict, Forbidden, RetryAfter, TelegramError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -25,13 +26,17 @@ from telegram.ext import (
 
 from .config import get_settings, require_token
 from .db import (
+    acquire_worker_lock,
     get_admin_stats,
     get_admin_broadcast_recipients,
+    get_broadcast_recipients,
     get_leaderboard,
     get_recent_finds,
     get_recent_users,
     init_db,
+    release_worker_lock,
     set_admin_subscriber_status,
+    set_user_status,
     upsert_admin_subscriber,
 )
 from .keyboards import (
@@ -51,9 +56,42 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 WAITING_BROADCAST_CONTENT = 1
+USER_DELIVERY_BOT_KEY = "user_delivery_bot"
+SETTINGS_KEY = "settings"
+ADMIN_LOCK_NAME = "word_game_admin_bot"
+
+
+def build_broadcast_targets(settings) -> dict:
+    user_recipients = get_broadcast_recipients()
+    admin_recipients = get_admin_broadcast_recipients()
+    user_recipient_ids = set(user_recipients)
+    admin_only_recipients = [
+        chat_id for chat_id in admin_recipients if chat_id not in user_recipient_ids
+    ]
+
+    targets = []
+    if settings.user_bot_token:
+        targets.extend(
+            {"chat_id": chat_id, "channel": "user"}
+            for chat_id in user_recipients
+        )
+    targets.extend(
+        {"chat_id": chat_id, "channel": "admin"}
+        for chat_id in admin_only_recipients
+    )
+
+    return {
+        "targets": targets,
+        "user_count": len(user_recipients),
+        "admin_only_count": len(admin_only_recipients),
+        "skipped_user_count": 0 if settings.user_bot_token else len(user_recipients),
+        "total_count": len(targets),
+    }
 
 
 async def post_init(application: Application):
+    settings = application.bot_data[SETTINGS_KEY]
+
     await application.bot.set_my_commands(
         [
             BotCommand("start", "Открыть админ-панель"),
@@ -63,6 +101,38 @@ async def post_init(application: Application):
             BotCommand("new_users", "Новые участники"),
             BotCommand("broadcast", "Сделать рассылку всем"),
         ]
+    )
+
+    if settings.user_bot_token:
+        delivery_bot = Bot(settings.user_bot_token)
+        await delivery_bot.initialize()
+        application.bot_data[USER_DELIVERY_BOT_KEY] = delivery_bot
+        logger.info("Подключил user-бота для рассылки игрокам.")
+    else:
+        logger.warning(
+            "USER_BOT_TOKEN не задан в admin service. "
+            "Рассылка сможет дойти только тем, кто нажал /start в админ-боте."
+        )
+
+
+async def post_shutdown(application: Application):
+    delivery_bot = application.bot_data.pop(USER_DELIVERY_BOT_KEY, None)
+    if delivery_bot is not None:
+        await delivery_bot.shutdown()
+
+
+async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    if isinstance(context.error, Conflict):
+        logger.error(
+            "Telegram вернул 409 Conflict: этот токен уже используется другим polling-инстансом. "
+            "Проверь, что бот не запущен локально, нет второго Railway deployment и не включено больше одной реплики."
+        )
+        return
+
+    logger.error(
+        "Необработанная ошибка в админ-боте: %s",
+        context.error,
+        exc_info=(type(context.error), context.error, context.error.__traceback__),
     )
 
 
@@ -311,17 +381,32 @@ async def new_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    recipients = get_admin_broadcast_recipients()
-    if not recipients:
+    settings = context.application.bot_data[SETTINGS_KEY]
+    plan = build_broadcast_targets(settings)
+
+    if not plan["targets"]:
         await update.message.reply_text(
-            "Пока некому отправлять рассылку: ещё никто не нажал /start в админ-боте.",
+            "Пока некому отправлять рассылку.\n\n"
+            "Либо ещё нет игроков, либо в admin service не указан USER_BOT_TOKEN, "
+            "и ещё никто не нажал /start в админ-боте.",
             reply_markup=admin_menu(),
         )
         return ConversationHandler.END
 
+    warning = ""
+    if plan["skipped_user_count"]:
+        warning = (
+            "\n\n⚠️ USER_BOT_TOKEN не задан в admin service, поэтому "
+            f"{plan['skipped_user_count']} игрокам user-бота сообщение сейчас не уйдёт."
+        )
+
     await update.message.reply_text(
         "📣 Режим рассылки включён.\n\n"
-        "Отправь одно сообщение, и я разошлю его всем подписчикам этого админ-бота.\n"
+        "Отправь одно сообщение, и я разошлю его всем доступным получателям.\n"
+        f"Игроки user-бота: {plan['user_count']}\n"
+        f"Только подписчики admin-бота: {plan['admin_only_count']}\n"
+        f"Итого получателей сейчас: {plan['total_count']}"
+        f"{warning}\n"
         "Поддерживаются: текст, фото, документ, видео, аудио, голосовое, анимация.\n\n"
         "Если передумал, нажми «Отмена».",
         reply_markup=admin_broadcast_menu(),
@@ -347,49 +432,63 @@ async def handle_broadcast_content(update: Update, context: ContextTypes.DEFAULT
         )
         return WAITING_BROADCAST_CONTENT
 
-    recipients = get_admin_broadcast_recipients()
-    if not recipients:
+    settings = context.application.bot_data[SETTINGS_KEY]
+    plan = build_broadcast_targets(settings)
+    if not plan["targets"]:
         await update.message.reply_text(
             "Пока нет подписчиков для рассылки.",
             reply_markup=admin_menu(),
         )
         return ConversationHandler.END
 
-    delivery_bot = context.application.bot
-    reusable_file_id: Optional[str] = None
+    user_delivery_bot = context.application.bot_data.get(USER_DELIVERY_BOT_KEY)
+    admin_delivery_bot = context.application.bot
+    reusable_file_ids = {"user": None, "admin": None}
     sent_count = 0
     failed_ids = []
+    skipped_ids = []
 
     await update.message.reply_text(
-        f"Начинаю рассылку по {len(recipients)} пользователям...",
+        f"Начинаю рассылку по {plan['total_count']} пользователям...",
         reply_markup=admin_broadcast_menu(),
     )
 
-    for index, chat_id in enumerate(recipients, start=1):
+    for index, target in enumerate(plan["targets"], start=1):
+        chat_id = target["chat_id"]
+        channel = target["channel"]
+        delivery_bot = user_delivery_bot if channel == "user" else admin_delivery_bot
+
+        if delivery_bot is None:
+            skipped_ids.append(chat_id)
+            continue
+
         try:
-            reusable_file_id, delivered = await _send_payload(
+            reusable_file_ids[channel], delivered = await _send_payload(
                 delivery_bot,
                 chat_id,
                 payload,
-                reusable_file_id,
+                reusable_file_ids[channel],
             )
             if delivered:
                 sent_count += 1
         except RetryAfter as exc:
             await asyncio.sleep(float(exc.retry_after) + 1)
             try:
-                reusable_file_id, delivered = await _send_payload(
+                reusable_file_ids[channel], delivered = await _send_payload(
                     delivery_bot,
                     chat_id,
                     payload,
-                    reusable_file_id,
+                    reusable_file_ids[channel],
                 )
                 if delivered:
                     sent_count += 1
             except TelegramError:
                 failed_ids.append(chat_id)
         except Forbidden:
-            set_admin_subscriber_status(chat_id, "blocked")
+            if channel == "user":
+                set_user_status(chat_id, "blocked")
+            else:
+                set_admin_subscriber_status(chat_id, "blocked")
             failed_ids.append(chat_id)
         except TelegramError:
             failed_ids.append(chat_id)
@@ -407,7 +506,8 @@ async def handle_broadcast_content(update: Update, context: ContextTypes.DEFAULT
     await update.message.reply_text(
         "✅ Рассылка завершена.\n\n"
         f"Успешно отправлено: {sent_count}\n"
-        f"Не доставлено: {len(failed_ids)}"
+        f"Не доставлено: {len(failed_ids)}\n"
+        f"Пропущено: {len(skipped_ids)}"
         f"{failed_tail}",
         reply_markup=admin_menu(),
     )
@@ -434,7 +534,14 @@ def build_application() -> Application:
     settings = get_settings()
     token = require_token(settings.admin_bot_token, "ADMIN_BOT_TOKEN")
 
-    application = Application.builder().token(token).post_init(post_init).build()
+    application = (
+        Application.builder()
+        .token(token)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
+    )
+    application.bot_data[SETTINGS_KEY] = settings
 
     broadcast_handler = ConversationHandler(
         entry_points=[
@@ -466,13 +573,24 @@ def build_application() -> Application:
         MessageHandler(filters.Regex(f"^{re.escape(BTN_ADMIN_RECENT_USERS)}$"), new_users)
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, route_buttons))
+    application.add_error_handler(handle_error)
     return application
 
 
 def main():
     init_db()
+    if not acquire_worker_lock(ADMIN_LOCK_NAME):
+        logger.error(
+            "Админ-бот уже запущен в другом инстансе с этой же базой. "
+            "Останавливаю текущий процесс, чтобы не словить двойной polling."
+        )
+        return
+
     logger.info("Запускаю админ-бота")
-    build_application().run_polling()
+    try:
+        build_application().run_polling()
+    finally:
+        release_worker_lock(ADMIN_LOCK_NAME)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import random
 import re
 import sqlite3
+import zlib
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from .config import get_settings
@@ -17,6 +18,7 @@ SETTINGS = get_settings()
 DB_PATH = SETTINGS.db_path
 DATABASE_URL = SETTINGS.database_url
 IS_POSTGRES = bool(DATABASE_URL)
+_LOCK_CONNECTIONS: Dict[str, Any] = {}
 
 
 def normalize_phone(phone: str) -> str:
@@ -42,6 +44,59 @@ def _get_connection():
     if IS_POSTGRES:
         return _get_postgres_connection()
     return _get_sqlite_connection()
+
+
+def _worker_lock_key(lock_name: str) -> int:
+    return zlib.crc32(lock_name.encode("utf-8")) & 0x7FFFFFFF
+
+
+def acquire_worker_lock(lock_name: str) -> bool:
+    if not IS_POSTGRES:
+        return True
+
+    if lock_name in _LOCK_CONNECTIONS:
+        return True
+
+    if psycopg is None:
+        raise RuntimeError("Для worker lock нужен установленный psycopg.")
+
+    conn = psycopg.connect(DATABASE_URL, autocommit=True)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_try_advisory_lock(%s) AS acquired",
+                (_worker_lock_key(lock_name),),
+            )
+            row = cursor.fetchone()
+            acquired = bool(row["acquired"])
+    except Exception:
+        conn.close()
+        raise
+
+    if not acquired:
+        conn.close()
+        return False
+
+    _LOCK_CONNECTIONS[lock_name] = conn
+    return True
+
+
+def release_worker_lock(lock_name: str):
+    if not IS_POSTGRES:
+        return
+
+    conn = _LOCK_CONNECTIONS.pop(lock_name, None)
+    if conn is None:
+        return
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_unlock(%s)",
+                (_worker_lock_key(lock_name),),
+            )
+    finally:
+        conn.close()
 
 
 def _fetch_all(query: str, params: Sequence[Any] = ()) -> List[Dict[str, Any]]:
@@ -372,6 +427,15 @@ def update_user_username(telegram_id: int, username: Optional[str]):
         else "UPDATE users SET username = ? WHERE telegram_id = ?"
     )
     _execute(query, (username, telegram_id))
+
+
+def set_user_status(telegram_id: int, status: str):
+    query = (
+        "UPDATE users SET status = %s WHERE telegram_id = %s"
+        if IS_POSTGRES
+        else "UPDATE users SET status = ? WHERE telegram_id = ?"
+    )
+    _execute(query, (status, telegram_id))
 
 
 def get_progress(telegram_id: int) -> dict:

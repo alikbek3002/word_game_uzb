@@ -11,6 +11,7 @@ import re
 from typing import Optional
 
 from telegram import BotCommand, Update
+from telegram.error import Conflict
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -22,6 +23,7 @@ from telegram.ext import (
 
 from .config import get_settings, require_token
 from .db import (
+    acquire_worker_lock,
     get_leaderboard,
     get_progress,
     get_random_target,
@@ -29,6 +31,7 @@ from .db import (
     init_db,
     normalize_phone,
     record_found,
+    release_worker_lock,
     register_user,
     update_user_name,
     update_user_phone,
@@ -63,6 +66,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 ASK_NAME, ASK_PHONE, ASK_PHOTO, WAITING_PHONE_GUESS, EDIT_NAME, EDIT_PHONE, EDIT_PHOTO = range(7)
+USER_LOCK_NAME = "word_game_user_bot"
 
 
 def validate_name(name: str) -> bool:
@@ -127,6 +131,21 @@ async def post_init(application: Application):
             BotCommand("leaderboard", "Показать лидеров"),
             BotCommand("help", "Краткая помощь"),
         ]
+    )
+
+
+async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    if isinstance(context.error, Conflict):
+        logger.error(
+            "Telegram вернул 409 Conflict: этот токен уже используется другим polling-инстансом. "
+            "Проверь, что user-бот не запущен локально, нет второго Railway deployment и не включено больше одной реплики."
+        )
+        return
+
+    logger.error(
+        "Необработанная ошибка в user-боте: %s",
+        context.error,
+        exc_info=(type(context.error), context.error, context.error.__traceback__),
     )
 
 
@@ -622,13 +641,24 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(BTN_BACK)}$"), back_to_menu))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, route_menu_buttons))
+    application.add_error_handler(handle_error)
     return application
 
 
 def main():
     init_db()
+    if not acquire_worker_lock(USER_LOCK_NAME):
+        logger.error(
+            "User-бот уже запущен в другом инстансе с этой же базой. "
+            "Останавливаю текущий процесс, чтобы не словить двойной polling."
+        )
+        return
+
     logger.info("Запускаю пользовательского бота")
-    build_application().run_polling()
+    try:
+        build_application().run_polling()
+    finally:
+        release_worker_lock(USER_LOCK_NAME)
 
 
 if __name__ == "__main__":
