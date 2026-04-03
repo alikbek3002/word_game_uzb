@@ -12,14 +12,35 @@ class Settings:
     app_role: Optional[str]
 
 
+def _read_env(name: str) -> Optional[str]:
+    value = os.getenv(name)
+    if value is None:
+        return None
+
+    value = value.strip()
+    return value or None
+
+
 def get_settings() -> Settings:
-    return Settings(
+    settings = Settings(
         db_path=os.getenv("DB_PATH", "find_stranger.db"),
-        database_url=os.getenv("DATABASE_URL"),
-        user_bot_token=os.getenv("USER_BOT_TOKEN") or os.getenv("BOT_TOKEN"),
-        admin_bot_token=os.getenv("ADMIN_BOT_TOKEN"),
-        app_role=(os.getenv("APP_ROLE", "").strip().lower() or None),
+        database_url=_read_env("DATABASE_URL"),
+        user_bot_token=_read_env("USER_BOT_TOKEN"),
+        admin_bot_token=_read_env("ADMIN_BOT_TOKEN"),
+        app_role=(_read_env("APP_ROLE") or "").lower() or None,
     )
+
+    if (
+        settings.user_bot_token
+        and settings.admin_bot_token
+        and settings.user_bot_token == settings.admin_bot_token
+    ):
+        raise RuntimeError(
+            "USER_BOT_TOKEN и ADMIN_BOT_TOKEN совпадают. "
+            "Для user-бота и admin-бота нужны два разных Telegram-бота."
+        )
+
+    return settings
 
 
 def require_token(token: Optional[str], env_name: str) -> str:

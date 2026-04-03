@@ -2,7 +2,7 @@
 Пользовательский Telegram-бот игры "Найди незнакомца".
 
 Переменные окружения:
-- USER_BOT_TOKEN или BOT_TOKEN
+- USER_BOT_TOKEN
 - DB_PATH (опционально)
 """
 

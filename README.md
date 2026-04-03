@@ -100,6 +100,8 @@ USER_BOT_TOKEN=...
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 ```
 
+Не добавляй сюда `ADMIN_BOT_TOKEN` и не используй общий `BOT_TOKEN`.
+
 ### Переменные для admin service
 
 `Start Command`:
@@ -114,6 +116,8 @@ python start_admin.py
 ADMIN_BOT_TOKEN=...
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 ```
+
+Не добавляй сюда `USER_BOT_TOKEN`.
 
 ### Как задеплоить удобно
 
@@ -131,6 +135,8 @@ DATABASE_URL=${{Postgres.DATABASE_URL}}
 - При наличии `DATABASE_URL` код автоматически переключается на Postgres.
 - Таблицы создаются автоматически при старте.
 - Для Railway не используй `python start.py`, чтобы user/admin сервисы не перепутались.
+- У user-бота и admin-бота должны быть два разных токена из `@BotFather`.
+- Если один и тот же токен запущен в двух местах, Telegram вернёт `409 Conflict`, и бот будет работать нестабильно.
 - Топ-10 лидеров в админ-боте берётся из общей Postgres-базы.
 - Для получения рассылки пользователь должен хотя бы один раз нажать `/start` в админ-боте.
 - Рассылка из админ-бота идёт только подписчикам этого же админ-бота.
