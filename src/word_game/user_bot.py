@@ -34,10 +34,12 @@ from .db import (
     release_worker_lock,
     register_user,
     update_user_name,
+    update_user_language,
     update_user_phone,
     update_user_photo,
     update_user_username,
 )
+from .i18n import COMMANDS, button_matches, button_pattern, normalize_language, resolve_language, t
 from .keyboards import (
     BTN_BACK,
     BTN_CANCEL,
@@ -45,6 +47,9 @@ from .keyboards import (
     BTN_EDIT_PHONE,
     BTN_EDIT_PHOTO,
     BTN_HELP,
+    BTN_LANGUAGE,
+    BTN_LANG_RU,
+    BTN_LANG_UZ,
     BTN_LEADERBOARD,
     BTN_PLAY,
     BTN_PROFILE,
@@ -54,10 +59,12 @@ from .keyboards import (
     BTN_SHARE_PHONE,
     game_menu,
     guest_menu,
+    language_menu,
     main_menu,
     phone_request_menu,
     photo_step_menu,
     profile_menu,
+    text_step_menu,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -65,8 +72,19 @@ logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-ASK_NAME, ASK_PHONE, ASK_PHOTO, WAITING_PHONE_GUESS, EDIT_NAME, EDIT_PHONE, EDIT_PHOTO = range(7)
+CHOOSE_LANGUAGE, ASK_NAME, ASK_PHONE, ASK_PHOTO, WAITING_PHONE_GUESS, EDIT_NAME, EDIT_PHONE, EDIT_PHOTO = range(8)
 USER_LOCK_NAME = "word_game_user_bot"
+LANGUAGE_NEXT_STEP_KEY = "language_next_step"
+NAVIGATION_BUTTON_FILTER = (
+    filters.Regex(button_pattern(BTN_REGISTER))
+    | filters.Regex(button_pattern(BTN_PLAY))
+    | filters.Regex(button_pattern(BTN_PROFILE))
+    | filters.Regex(button_pattern(BTN_SCORE))
+    | filters.Regex(button_pattern(BTN_LEADERBOARD))
+    | filters.Regex(button_pattern(BTN_HELP))
+    | filters.Regex(button_pattern(BTN_LANGUAGE))
+    | filters.Regex(button_pattern(BTN_BACK))
+)
 
 
 def validate_name(name: str) -> bool:
@@ -99,39 +117,143 @@ def clear_game_state(context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop(key, None)
 
 
-def home_text(user: dict, progress: dict) -> str:
-    return (
-        f"🎉 {user['name']}, ты в игре!\n\n"
-        f"🏆 Очки: {user['score']}\n"
-        f"✅ Найдено: {progress['found_count']} из {progress['total_targets']}\n"
-        f"🎯 Осталось: {progress['remaining_count']}\n\n"
-        "Нажми кнопку ниже и бот сразу даст следующего участника."
+def get_current_language(
+    context: ContextTypes.DEFAULT_TYPE,
+    user: Optional[dict] = None,
+) -> str:
+    if user:
+        language = resolve_language(user.get("language"))
+        context.user_data["lang"] = language
+        return language
+
+    return resolve_language(context.user_data.get("lang"))
+
+
+def reset_user_state(context: ContextTypes.DEFAULT_TYPE):
+    language = normalize_language(context.user_data.get("lang"))
+    context.user_data.clear()
+    if language:
+        context.user_data["lang"] = language
+
+
+def home_text(language: str, user: dict, progress: dict) -> str:
+    return t(
+        language,
+        "home_text",
+        name=user["name"],
+        score=user["score"],
+        found_count=progress["found_count"],
+        total_targets=progress["total_targets"],
+        remaining_count=progress["remaining_count"],
     )
 
 
-def leaderboard_text(limit: int = 10) -> str:
+def leaderboard_text(language: str, limit: int = 10) -> str:
     rows = get_leaderboard(limit=limit)
     if not rows:
-        return "📊 Пока в таблице лидеров никого нет."
+        return t(language, "leaderboard_empty")
 
-    lines = ["🏆 Топ игроков:\n"]
+    lines = [t(language, "leaderboard_title")]
     for index, row in enumerate(rows, start=1):
         badge = {1: "🥇", 2: "🥈", 3: "🥉"}.get(index, f"{index}.")
-        lines.append(f"{badge} {row['name']} — {row['score']} очк.")
+        lines.append(
+            t(
+                language,
+                "leaderboard_line",
+                badge=badge,
+                name=row["name"],
+                score=row["score"],
+            )
+        )
     return "\n".join(lines)
 
 
 async def post_init(application: Application):
-    await application.bot.set_my_commands(
-        [
-            BotCommand("start", "Открыть меню и регистрацию"),
-            BotCommand("guess_who", "Получить следующего участника"),
-            BotCommand("profile", "Показать профиль"),
-            BotCommand("score", "Показать счёт"),
-            BotCommand("leaderboard", "Показать лидеров"),
-            BotCommand("help", "Краткая помощь"),
+    for language in ("ru", "uz"):
+        commands = [
+            BotCommand(command, description)
+            for command, description in COMMANDS[language].items()
         ]
+        await application.bot.set_my_commands(commands, language_code=language)
+
+    await application.bot.set_my_commands(
+        [BotCommand(command, description) for command, description in COMMANDS["ru"].items()]
     )
+
+
+async def show_language_picker(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    next_step: str,
+    include_cancel: bool,
+):
+    current_language = resolve_language(context.user_data.get("lang"))
+    context.user_data[LANGUAGE_NEXT_STEP_KEY] = next_step
+    await update.message.reply_text(
+        t(current_language, "choose_language"),
+        reply_markup=language_menu(current_language, include_cancel=include_cancel),
+    )
+    return CHOOSE_LANGUAGE
+
+
+async def choose_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    next_step = context.user_data.get(LANGUAGE_NEXT_STEP_KEY, "guest")
+
+    if button_matches(text, BTN_LANG_RU):
+        language = "ru"
+    elif button_matches(text, BTN_LANG_UZ):
+        language = "uz"
+    elif button_matches(text, BTN_CANCEL):
+        context.user_data.pop(LANGUAGE_NEXT_STEP_KEY, None)
+        user = get_user(update.effective_user.id)
+        language = get_current_language(context, user)
+        if user:
+            await send_registered_home(
+                update,
+                context,
+                intro=t(language, "choose_language_cancelled"),
+            )
+            return ConversationHandler.END
+
+        await update.message.reply_text(
+            t(language, "choose_language_cancelled"),
+            reply_markup=guest_menu(language),
+        )
+        return ConversationHandler.END
+    else:
+        current_language = resolve_language(context.user_data.get("lang"))
+        await update.message.reply_text(
+            t(current_language, "choose_language_retry"),
+            reply_markup=language_menu(current_language, include_cancel=next_step != "register"),
+        )
+        return CHOOSE_LANGUAGE
+
+    context.user_data["lang"] = language
+    context.user_data.pop(LANGUAGE_NEXT_STEP_KEY, None)
+    user = get_user(update.effective_user.id)
+
+    if user:
+        update_user_language(update.effective_user.id, language)
+
+    if next_step == "register":
+        reset_user_state(context)
+        context.user_data["lang"] = language
+        await update.message.reply_text(
+            t(language, "registration_intro"),
+            reply_markup=text_step_menu(language),
+        )
+        return ASK_NAME
+
+    if user:
+        await send_registered_home(update, context, intro=t(language, "choose_language_updated"))
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        t(language, "choose_language_updated"),
+        reply_markup=guest_menu(language),
+    )
+    return ConversationHandler.END
 
 
 async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -156,97 +278,100 @@ async def send_registered_home(
 ):
     user = get_user(update.effective_user.id)
     if not user:
+        if not normalize_language(context.user_data.get("lang")):
+            return await show_language_picker(update, context, next_step="register", include_cancel=False)
+
+        language = get_current_language(context)
         await update.message.reply_text(
-            "✨ Ты ещё не зарегистрирован. Нажми кнопку ниже, и начнём.",
-            reply_markup=guest_menu(),
+            t(language, "guest_not_registered"),
+            reply_markup=guest_menu(language),
         )
         return
 
+    language = get_current_language(context, user)
     sync_username(update, user)
     progress = get_progress(update.effective_user.id)
-    text = home_text(user, progress)
+    text = home_text(language, user, progress)
     if intro:
         text = f"{intro}\n\n{text}"
-    await update.message.reply_text(text, reply_markup=main_menu())
+    await update.message.reply_text(text, reply_markup=main_menu(language))
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
     if user:
-        await send_registered_home(update, context, intro="👋 С возвращением!")
+        await send_registered_home(update, context, intro=t(user.get("language"), "return_intro"))
         return ConversationHandler.END
 
-    context.user_data.clear()
+    if not normalize_language(context.user_data.get("lang")):
+        reset_user_state(context)
+        return await show_language_picker(update, context, next_step="register", include_cancel=False)
+
+    language = get_current_language(context)
+    reset_user_state(context)
+    context.user_data["lang"] = language
     await update.message.reply_text(
-        "👋 Добро пожаловать в «Найди незнакомца»!\n\n"
-        "Сначала создадим твою карточку участника. Как тебя зовут?",
-        reply_markup=guest_menu(),
+        t(language, "registration_intro"),
+        reply_markup=text_step_menu(language),
     )
     return ASK_NAME
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
-    reply_markup = main_menu() if user else guest_menu()
+    language = get_current_language(context, user)
+    reply_markup = main_menu(language) if user else guest_menu(language)
     await update.message.reply_text(
-        "Как это работает:\n"
-        "1. Регистрируешься: имя, номер, фото.\n"
-        "2. Нажимаешь «Найти участника».\n"
-        "3. Бот показывает фото и имя человека.\n"
-        "4. Находишь его вживую, узнаёшь номер и отправляешь в бот.\n\n"
-        "Команда /cancel отменяет текущий шаг.",
+        t(language, "help_text"),
         reply_markup=reply_markup,
     )
 
 
 async def ask_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    language = get_current_language(context)
     name = update.message.text.strip()
     if not validate_name(name):
-        await update.message.reply_text(
-            "Напиши имя длиной от 2 до 40 символов. Желательно без цифр и лишних знаков."
-        )
+        await update.message.reply_text(t(language, "invalid_name"))
         return ASK_NAME
 
     context.user_data["reg_name"] = name
     await update.message.reply_text(
-        "📱 Теперь отправь свой номер.\n"
-        "Можно нажать кнопку ниже или ввести вручную в любом удобном формате.",
-        reply_markup=phone_request_menu(),
+        t(language, "ask_phone"),
+        reply_markup=phone_request_menu(language),
     )
     return ASK_PHONE
 
 
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    language = get_current_language(context)
     if update.message.contact:
         contact = update.message.contact
         if contact.user_id and contact.user_id != update.effective_user.id:
-            await update.message.reply_text("Пожалуйста, отправь свой собственный номер.")
+            await update.message.reply_text(t(language, "own_phone_only"))
             return ASK_PHONE
         phone = contact.phone_number
     else:
         phone = update.message.text.strip()
-        if phone == BTN_SHARE_PHONE:
-            await update.message.reply_text("Нажми системную кнопку отправки контакта ниже.")
+        if button_matches(phone, BTN_SHARE_PHONE):
+            await update.message.reply_text(t(language, "press_contact_button"))
             return ASK_PHONE
 
     if not validate_phone(phone):
-        await update.message.reply_text(
-            "Номер выглядит странно. Отправь телефон ещё раз, например: +998 90 123 45 67"
-        )
+        await update.message.reply_text(t(language, "invalid_phone"))
         return ASK_PHONE
 
     context.user_data["reg_phone"] = phone
     await update.message.reply_text(
-        "🖼 Отлично. Теперь отправь своё фото как обычную фотографию, не файлом.\n"
-        "Именно его увидят другие участники во время поиска.",
-        reply_markup=photo_step_menu(),
+        t(language, "ask_photo"),
+        reply_markup=photo_step_menu(language),
     )
     return ASK_PHOTO
 
 
 async def ask_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    language = get_current_language(context)
     if not update.message.photo:
-        await update.message.reply_text("Нужно именно фото. Попробуй отправить его ещё раз.")
+        await update.message.reply_text(t(language, "photo_required"))
         return ASK_PHOTO
 
     register_user(
@@ -254,80 +379,106 @@ async def ask_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         name=context.user_data["reg_name"],
         phone=context.user_data["reg_phone"],
         photo_file_id=update.message.photo[-1].file_id,
+        language=language,
         username=update.effective_user.username,
     )
-    context.user_data.clear()
+    reset_user_state(context)
+    context.user_data["lang"] = language
     await update.message.reply_text(
-        "✅ Готово! Профиль создан.\n\n"
-        "Теперь можно искать участников, смотреть счёт и редактировать профиль прямо из меню.",
-        reply_markup=main_menu(),
+        t(language, "profile_created"),
+        reply_markup=main_menu(language),
     )
     await send_registered_home(update, context)
     return ConversationHandler.END
 
 
 async def cancel_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
+    language = get_current_language(context)
+    reset_user_state(context)
+    context.user_data["lang"] = language
     user = get_user(update.effective_user.id)
     if user:
-        await update.message.reply_text("Регистрация или редактирование отменены.", reply_markup=main_menu())
+        await update.message.reply_text(
+            t(language, "cancel_registered"),
+            reply_markup=main_menu(language),
+        )
     else:
-        await update.message.reply_text("Регистрация отменена.", reply_markup=guest_menu())
+        await update.message.reply_text(
+            t(language, "cancel_guest"),
+            reply_markup=guest_menu(language),
+        )
     return ConversationHandler.END
 
 
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
     if not user:
+        language = get_current_language(context)
         await update.message.reply_text(
-            "Сначала зарегистрируйся через /start.",
-            reply_markup=guest_menu(),
+            t(language, "register_first"),
+            reply_markup=guest_menu(language),
         )
         return
 
+    language = get_current_language(context, user)
     sync_username(update, user)
     progress = get_progress(update.effective_user.id)
-    username = f"@{user['username']}" if user.get("username") else "не указан"
+    username = f"@{user['username']}" if user.get("username") else t(language, "username_missing")
     await update.message.reply_text(
-        "👤 Твой профиль\n\n"
-        f"Имя: {user['name']}\n"
-        f"Username: {username}\n"
-        f"Телефон: {mask_phone(user['phone'])}\n"
-        f"Очки: {user['score']}\n"
-        f"Найдено участников: {progress['found_count']}\n\n"
-        "Если хочешь что-то обновить, выбери нужный пункт ниже.",
-        reply_markup=profile_menu(),
+        t(
+            language,
+            "profile_text",
+            name=user["name"],
+            username=username,
+            phone=mask_phone(user["phone"]),
+            score=user["score"],
+            found_count=progress["found_count"],
+        ),
+        reply_markup=profile_menu(language),
     )
 
 
 async def score(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
     if not user:
-        await update.message.reply_text("Сначала зарегистрируйся через /start.", reply_markup=guest_menu())
+        language = get_current_language(context)
+        await update.message.reply_text(
+            t(language, "register_first"),
+            reply_markup=guest_menu(language),
+        )
         return
 
+    language = get_current_language(context, user)
     progress = get_progress(update.effective_user.id)
     await update.message.reply_text(
-        f"🏆 У тебя {user['score']} очк.\n"
-        f"✅ Найдено: {progress['found_count']} из {progress['total_targets']}\n"
-        f"🎯 Осталось: {progress['remaining_count']}",
-        reply_markup=main_menu(),
+        t(
+            language,
+            "score_text",
+            score=user["score"],
+            found_count=progress["found_count"],
+            total_targets=progress["total_targets"],
+            remaining_count=progress["remaining_count"],
+        ),
+        reply_markup=main_menu(language),
     )
 
 
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
-    reply_markup = main_menu() if user else guest_menu()
-    await update.message.reply_text(leaderboard_text(limit=10), reply_markup=reply_markup)
+    language = get_current_language(context, user)
+    reply_markup = main_menu(language) if user else guest_menu(language)
+    await update.message.reply_text(leaderboard_text(language, limit=10), reply_markup=reply_markup)
 
 
 async def present_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finder_id = update.effective_user.id
+    user = get_user(finder_id)
+    language = get_current_language(context, user)
     progress = get_progress(finder_id)
     if progress["total_targets"] == 0:
         await update.message.reply_text(
-            "😅 Пока кроме тебя никого нет в игре. Подожди, пока зарегистрируются другие.",
-            reply_markup=main_menu(),
+            t(language, "no_targets"),
+            reply_markup=main_menu(language),
         )
         return ConversationHandler.END
 
@@ -340,8 +491,8 @@ async def present_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not target:
         clear_game_state(context)
         await update.message.reply_text(
-            "🏁 Ты уже нашёл всех доступных участников. Отличная работа!",
-            reply_markup=main_menu(),
+            t(language, "all_found"),
+            reply_markup=main_menu(language),
         )
         return ConversationHandler.END
 
@@ -353,14 +504,14 @@ async def present_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_photo(
         photo=target["photo_file_id"],
-        caption=(
-            "🔍 Новый поиск\n\n"
-            f"👤 Имя: {target['name']}\n"
-            f"🏆 Твой прогресс: {progress['found_count']} из {progress['total_targets']}\n\n"
-            "Найди этого человека на мероприятии, узнай его номер и пришли сюда.\n"
-            "Если хочешь другую цель, нажми «Другой участник»."
+        caption=t(
+            language,
+            "target_caption",
+            name=target["name"],
+            found_count=progress["found_count"],
+            total_targets=progress["total_targets"],
         ),
-        reply_markup=game_menu(),
+        reply_markup=game_menu(language),
     )
     return WAITING_PHONE_GUESS
 
@@ -368,10 +519,16 @@ async def present_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def guess_who(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
     if not user:
-        await update.message.reply_text("Сначала зарегистрируйся через /start.", reply_markup=guest_menu())
+        language = get_current_language(context)
+        await update.message.reply_text(
+            t(language, "register_first"),
+            reply_markup=guest_menu(language),
+        )
         return ConversationHandler.END
 
+    language = get_current_language(context, user)
     sync_username(update, user)
+    context.user_data["lang"] = language
     return await present_target(update, context)
 
 
@@ -380,6 +537,7 @@ async def skip_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def check_phone_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    language = get_current_language(context)
     guess = normalize_phone(update.message.text)
     correct_phone = context.user_data.get("current_target_phone")
     target_id = context.user_data.get("current_target_id")
@@ -387,8 +545,8 @@ async def check_phone_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not correct_phone or not target_id:
         clear_game_state(context)
         await update.message.reply_text(
-            "Сессия поиска сбилась. Нажми «Найти участника» ещё раз.",
-            reply_markup=main_menu(),
+            t(language, "session_lost"),
+            reply_markup=main_menu(language),
         )
         return ConversationHandler.END
 
@@ -396,14 +554,18 @@ async def check_phone_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
         inserted = record_found(update.effective_user.id, target_id)
         clear_game_state(context)
         user = get_user(update.effective_user.id)
+        language = get_current_language(context, user)
         progress = get_progress(update.effective_user.id)
-        bonus_text = "+1 очко!" if inserted else "Повтор уже был засчитан раньше."
+        bonus_text = t(language, "guess_bonus_new") if inserted else t(language, "guess_bonus_repeat")
         await update.message.reply_text(
-            "✅ Номер совпал.\n"
-            f"{bonus_text}\n"
-            f"🏆 Твой счёт: {user['score'] if user else 0}\n"
-            f"🎯 Осталось участников: {progress['remaining_count']}",
-            reply_markup=main_menu(),
+            t(
+                language,
+                "guess_correct",
+                bonus_text=bonus_text,
+                score=user["score"] if user else 0,
+                remaining_count=progress["remaining_count"],
+            ),
+            reply_markup=main_menu(language),
         )
         return ConversationHandler.END
 
@@ -411,101 +573,122 @@ async def check_phone_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["guess_attempts"] = attempts
 
     if attempts == 1:
-        hint = "Пока не совпало. Попробуй ещё раз."
+        hint = t(language, "guess_hint_first")
     elif attempts == 2:
-        hint = f"Подсказка: в номере {len(correct_phone)} цифр."
+        hint = t(language, "guess_hint_second", digits=len(correct_phone))
     else:
-        hint = f"Подсказка: последние 2 цифры номера — {correct_phone[-2:]}."
+        hint = t(language, "guess_hint_third", last_digits=correct_phone[-2:])
 
     await update.message.reply_text(
-        f"❌ Неверный номер.\n{hint}\n\n"
-        "Можешь ввести номер ещё раз или выбрать другого участника.",
-        reply_markup=game_menu(),
+        t(language, "guess_wrong", hint=hint),
+        reply_markup=game_menu(language),
     )
     return WAITING_PHONE_GUESS
 
 
 async def cancel_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    language = get_current_language(context)
     clear_game_state(context)
     await update.message.reply_text(
-        "Поиск остановлен. Когда будешь готов, нажми «Найти участника».",
-        reply_markup=main_menu(),
+        t(language, "guess_cancelled"),
+        reply_markup=main_menu(language),
     )
     return ConversationHandler.END
 
 
 async def start_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not get_user(update.effective_user.id):
-        await update.message.reply_text("Сначала зарегистрируйся через /start.", reply_markup=guest_menu())
+    user = get_user(update.effective_user.id)
+    if not user:
+        language = get_current_language(context)
+        await update.message.reply_text(
+            t(language, "register_first"),
+            reply_markup=guest_menu(language),
+        )
         return ConversationHandler.END
 
-    await update.message.reply_text("Напиши новое имя:", reply_markup=profile_menu())
+    language = get_current_language(context, user)
+    await update.message.reply_text(t(language, "edit_name_prompt"), reply_markup=profile_menu(language))
     return EDIT_NAME
 
 
 async def save_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    language = get_current_language(context)
     name = update.message.text.strip()
     if not validate_name(name):
-        await update.message.reply_text("Имя должно быть от 2 до 40 символов и выглядеть как имя.")
+        await update.message.reply_text(t(language, "edit_name_invalid"))
         return EDIT_NAME
 
     update_user_name(update.effective_user.id, name)
-    await update.message.reply_text("Имя обновлено ✅", reply_markup=profile_menu())
+    await update.message.reply_text(t(language, "edit_name_done"), reply_markup=profile_menu(language))
     await profile(update, context)
     return ConversationHandler.END
 
 
 async def start_edit_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not get_user(update.effective_user.id):
-        await update.message.reply_text("Сначала зарегистрируйся через /start.", reply_markup=guest_menu())
+    user = get_user(update.effective_user.id)
+    if not user:
+        language = get_current_language(context)
+        await update.message.reply_text(
+            t(language, "register_first"),
+            reply_markup=guest_menu(language),
+        )
         return ConversationHandler.END
 
+    language = get_current_language(context, user)
     await update.message.reply_text(
-        "Отправь новый номер телефона.",
-        reply_markup=phone_request_menu(),
+        t(language, "edit_phone_prompt"),
+        reply_markup=phone_request_menu(language),
     )
     return EDIT_PHONE
 
 
 async def save_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    language = get_current_language(context)
     if update.message.contact:
         contact = update.message.contact
         if contact.user_id and contact.user_id != update.effective_user.id:
-            await update.message.reply_text("Отправь, пожалуйста, свой собственный номер.")
+            await update.message.reply_text(t(language, "edit_phone_own_only"))
             return EDIT_PHONE
         phone = contact.phone_number
     else:
         phone = update.message.text.strip()
 
     if not validate_phone(phone):
-        await update.message.reply_text("Номер не подошёл. Попробуй ещё раз.")
+        await update.message.reply_text(t(language, "edit_phone_invalid"))
         return EDIT_PHONE
 
     update_user_phone(update.effective_user.id, phone)
-    await update.message.reply_text("Телефон обновлён ✅", reply_markup=profile_menu())
+    await update.message.reply_text(t(language, "edit_phone_done"), reply_markup=profile_menu(language))
     await profile(update, context)
     return ConversationHandler.END
 
 
 async def start_edit_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not get_user(update.effective_user.id):
-        await update.message.reply_text("Сначала зарегистрируйся через /start.", reply_markup=guest_menu())
+    user = get_user(update.effective_user.id)
+    if not user:
+        language = get_current_language(context)
+        await update.message.reply_text(
+            t(language, "register_first"),
+            reply_markup=guest_menu(language),
+        )
         return ConversationHandler.END
 
+    language = get_current_language(context, user)
     await update.message.reply_text(
-        "Отправь новое фото профиля как обычную фотографию.",
-        reply_markup=photo_step_menu(),
+        t(language, "edit_photo_prompt"),
+        reply_markup=photo_step_menu(language),
     )
     return EDIT_PHOTO
 
 
 async def save_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    language = get_current_language(context)
     if not update.message.photo:
-        await update.message.reply_text("Нужно именно фото. Попробуй ещё раз.")
+        await update.message.reply_text(t(language, "photo_required"))
         return EDIT_PHOTO
 
     update_user_photo(update.effective_user.id, update.message.photo[-1].file_id)
-    await update.message.reply_text("Фото обновлено ✅", reply_markup=profile_menu())
+    await update.message.reply_text(t(language, "edit_photo_done"), reply_markup=profile_menu(language))
     await profile(update, context)
     return ConversationHandler.END
 
@@ -519,40 +702,81 @@ async def back_to_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def start_language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = get_user(update.effective_user.id)
+    if user:
+        language = get_current_language(context, user)
+        context.user_data["lang"] = language
+        return await show_language_picker(update, context, next_step="home", include_cancel=True)
+
+    if not normalize_language(context.user_data.get("lang")):
+        return await show_language_picker(update, context, next_step="register", include_cancel=False)
+
+    language = get_current_language(context)
+    context.user_data["lang"] = language
+    return await show_language_picker(update, context, next_step="guest", include_cancel=True)
+
+
+async def change_language_during_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await show_language_picker(update, context, next_step="register", include_cancel=True)
+
+
+async def handle_navigation_during_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    clear_game_state(context)
+    return await route_menu_buttons(update, context)
+
+
+async def handle_navigation_during_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await route_menu_buttons(update, context)
+
+
 async def route_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    if text == BTN_REGISTER:
+    if button_matches(text, BTN_REGISTER):
         return await start(update, context)
-    if text == BTN_PLAY:
+    if button_matches(text, BTN_PLAY):
         return await guess_who(update, context)
-    if text == BTN_PROFILE:
+    if button_matches(text, BTN_PROFILE):
         return await profile(update, context)
-    if text == BTN_SCORE:
+    if button_matches(text, BTN_SCORE):
         return await score(update, context)
-    if text == BTN_LEADERBOARD:
+    if button_matches(text, BTN_LEADERBOARD):
         return await leaderboard(update, context)
-    if text == BTN_HELP:
+    if button_matches(text, BTN_HELP):
         return await help_command(update, context)
-    if text == BTN_BACK:
+    if button_matches(text, BTN_LANGUAGE):
+        return await start_language_selection(update, context)
+    if button_matches(text, BTN_BACK):
         return await back_to_menu(update, context)
-    if text == BTN_CANCEL:
+    if button_matches(text, BTN_CANCEL):
         user = get_user(update.effective_user.id)
+        language = get_current_language(context, user)
         if user:
-            await update.message.reply_text("Сейчас ничего не выполняется.", reply_markup=main_menu())
+            await update.message.reply_text(
+                t(language, "idle_registered"),
+                reply_markup=main_menu(language),
+            )
         else:
-            await update.message.reply_text("Сейчас нет активного шага регистрации.", reply_markup=guest_menu())
+            await update.message.reply_text(
+                t(language, "idle_guest"),
+                reply_markup=guest_menu(language),
+            )
         return
 
     user = get_user(update.effective_user.id)
+    language = get_current_language(context, user)
     if user:
         await update.message.reply_text(
-            "Я не понял это сообщение. Выбери действие из меню ниже.",
-            reply_markup=main_menu(),
+            t(language, "unknown_registered"),
+            reply_markup=main_menu(language),
         )
     else:
+        if not normalize_language(context.user_data.get("lang")):
+            return await show_language_picker(update, context, next_step="register", include_cancel=False)
+
         await update.message.reply_text(
-            "Я не понял это сообщение. Нажми «Зарегистрироваться», и начнём.",
-            reply_markup=guest_menu(),
+            t(language, "unknown_guest"),
+            reply_markup=guest_menu(language),
         )
 
 
@@ -565,20 +789,26 @@ def build_application() -> Application:
     registration_handler = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
-            MessageHandler(filters.Regex(f"^{re.escape(BTN_REGISTER)}$"), start),
+            MessageHandler(filters.Regex(button_pattern(BTN_REGISTER)), start),
+            MessageHandler(filters.Regex(button_pattern(BTN_LANGUAGE)), start_language_selection),
         ],
         states={
+            CHOOSE_LANGUAGE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, choose_language),
+            ],
             ASK_NAME: [
-                MessageHandler(filters.Regex(f"^{re.escape(BTN_CANCEL)}$"), cancel_registration),
+                MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
+                MessageHandler(filters.Regex(button_pattern(BTN_LANGUAGE)), change_language_during_registration),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name),
             ],
             ASK_PHONE: [
-                MessageHandler(filters.Regex(f"^{re.escape(BTN_CANCEL)}$"), cancel_registration),
+                MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
+                MessageHandler(NAVIGATION_BUTTON_FILTER, handle_navigation_during_phone_input),
                 MessageHandler(filters.CONTACT, ask_phone),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ask_phone),
             ],
             ASK_PHOTO: [
-                MessageHandler(filters.Regex(f"^{re.escape(BTN_CANCEL)}$"), cancel_registration),
+                MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
                 MessageHandler(filters.PHOTO, ask_photo),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ask_photo),
             ],
@@ -590,12 +820,13 @@ def build_application() -> Application:
     game_handler = ConversationHandler(
         entry_points=[
             CommandHandler("guess_who", guess_who),
-            MessageHandler(filters.Regex(f"^{re.escape(BTN_PLAY)}$"), guess_who),
+            MessageHandler(filters.Regex(button_pattern(BTN_PLAY)), guess_who),
         ],
         states={
             WAITING_PHONE_GUESS: [
-                MessageHandler(filters.Regex(f"^{re.escape(BTN_SKIP)}$"), skip_target),
-                MessageHandler(filters.Regex(f"^{re.escape(BTN_CANCEL)}$"), cancel_guess),
+                MessageHandler(filters.Regex(button_pattern(BTN_SKIP)), skip_target),
+                MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_guess),
+                MessageHandler(NAVIGATION_BUTTON_FILTER, handle_navigation_during_guess),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, check_phone_guess),
             ],
         },
@@ -605,25 +836,26 @@ def build_application() -> Application:
 
     edit_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex(f"^{re.escape(BTN_EDIT_NAME)}$"), start_edit_name),
-            MessageHandler(filters.Regex(f"^{re.escape(BTN_EDIT_PHONE)}$"), start_edit_phone),
-            MessageHandler(filters.Regex(f"^{re.escape(BTN_EDIT_PHOTO)}$"), start_edit_photo),
+            MessageHandler(filters.Regex(button_pattern(BTN_EDIT_NAME)), start_edit_name),
+            MessageHandler(filters.Regex(button_pattern(BTN_EDIT_PHONE)), start_edit_phone),
+            MessageHandler(filters.Regex(button_pattern(BTN_EDIT_PHOTO)), start_edit_photo),
         ],
         states={
             EDIT_NAME: [
-                MessageHandler(filters.Regex(f"^{re.escape(BTN_CANCEL)}$"), cancel_registration),
-                MessageHandler(filters.Regex(f"^{re.escape(BTN_BACK)}$"), back_to_profile),
+                MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
+                MessageHandler(filters.Regex(button_pattern(BTN_BACK)), back_to_profile),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, save_name),
             ],
             EDIT_PHONE: [
-                MessageHandler(filters.Regex(f"^{re.escape(BTN_CANCEL)}$"), cancel_registration),
-                MessageHandler(filters.Regex(f"^{re.escape(BTN_BACK)}$"), back_to_profile),
+                MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
+                MessageHandler(filters.Regex(button_pattern(BTN_BACK)), back_to_profile),
+                MessageHandler(NAVIGATION_BUTTON_FILTER, handle_navigation_during_phone_input),
                 MessageHandler(filters.CONTACT, save_phone),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, save_phone),
             ],
             EDIT_PHOTO: [
-                MessageHandler(filters.Regex(f"^{re.escape(BTN_CANCEL)}$"), cancel_registration),
-                MessageHandler(filters.Regex(f"^{re.escape(BTN_BACK)}$"), back_to_profile),
+                MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
+                MessageHandler(filters.Regex(button_pattern(BTN_BACK)), back_to_profile),
                 MessageHandler(filters.PHOTO, save_photo),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, save_photo),
             ],
@@ -639,7 +871,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("score", score))
     application.add_handler(CommandHandler("leaderboard", leaderboard))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(MessageHandler(filters.Regex(f"^{re.escape(BTN_BACK)}$"), back_to_menu))
+    application.add_handler(MessageHandler(filters.Regex(button_pattern(BTN_BACK)), back_to_menu))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, route_menu_buttons))
     application.add_error_handler(handle_error)
     return application

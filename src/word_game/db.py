@@ -5,6 +5,7 @@ import zlib
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from .config import get_settings
+from .i18n import DEFAULT_LANGUAGE, resolve_language
 
 try:
     import psycopg
@@ -194,6 +195,7 @@ def init_db():
                 name TEXT NOT NULL,
                 phone TEXT NOT NULL,
                 normalized_phone TEXT,
+                language TEXT DEFAULT 'ru',
                 username TEXT,
                 photo_file_id TEXT NOT NULL,
                 score INTEGER DEFAULT 0,
@@ -233,6 +235,7 @@ def init_db():
                 name TEXT NOT NULL,
                 phone TEXT NOT NULL,
                 normalized_phone TEXT,
+                language TEXT DEFAULT 'ru',
                 username TEXT,
                 photo_file_id TEXT NOT NULL,
                 score INTEGER DEFAULT 0,
@@ -266,6 +269,7 @@ def init_db():
         )
 
     _ensure_column("users", "normalized_phone", "TEXT")
+    _ensure_column("users", "language", "TEXT DEFAULT 'ru'")
     _ensure_column("users", "username", "TEXT")
     _ensure_column("users", "status", "TEXT DEFAULT 'active'")
     _ensure_column("admin_subscribers", "username", "TEXT")
@@ -277,20 +281,21 @@ def init_db():
 
     if IS_POSTGRES:
         rows = _fetch_all(
-            "SELECT telegram_id, phone, normalized_phone, status FROM users"
+            "SELECT telegram_id, phone, normalized_phone, language, status FROM users"
         )
         queries = []
         for row in rows:
             next_phone = row["normalized_phone"] or normalize_phone(row["phone"])
+            next_language = resolve_language(row.get("language"))
             next_status = row["status"] or "active"
             queries.append(
                 (
                     """
                     UPDATE users
-                    SET normalized_phone = %s, status = %s
+                    SET normalized_phone = %s, language = %s, status = %s
                     WHERE telegram_id = %s
                     """,
-                    (next_phone, next_status, row["telegram_id"]),
+                    (next_phone, next_language, next_status, row["telegram_id"]),
                 )
             )
         if queries:
@@ -316,19 +321,20 @@ def init_db():
         )
         return
 
-    rows = _fetch_all("SELECT telegram_id, phone, normalized_phone, status FROM users")
+    rows = _fetch_all("SELECT telegram_id, phone, normalized_phone, language, status FROM users")
     queries = []
     for row in rows:
         next_phone = row["normalized_phone"] or normalize_phone(row["phone"])
+        next_language = resolve_language(row.get("language"))
         next_status = row["status"] or "active"
         queries.append(
             (
                 """
                 UPDATE users
-                SET normalized_phone = ?, status = ?
+                SET normalized_phone = ?, language = ?, status = ?
                 WHERE telegram_id = ?
                 """,
-                (next_phone, next_status, row["telegram_id"]),
+                (next_phone, next_language, next_status, row["telegram_id"]),
             )
         )
     if queries:
@@ -364,28 +370,46 @@ def register_user(
     name: str,
     phone: str,
     photo_file_id: str,
+    language: str = DEFAULT_LANGUAGE,
     username: Optional[str] = None,
 ):
+    language = resolve_language(language)
     if IS_POSTGRES:
         _execute(
             """
             INSERT INTO users (
-                telegram_id, name, phone, normalized_phone, username, photo_file_id, status
+                telegram_id, name, phone, normalized_phone, language, username, photo_file_id, status
             )
-            VALUES (%s, %s, %s, %s, %s, %s, 'active')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'active')
             """,
-            (telegram_id, name, phone, normalize_phone(phone), username, photo_file_id),
+            (
+                telegram_id,
+                name,
+                phone,
+                normalize_phone(phone),
+                language,
+                username,
+                photo_file_id,
+            ),
         )
         return
 
     _execute(
         """
         INSERT INTO users (
-            telegram_id, name, phone, normalized_phone, username, photo_file_id, status
+            telegram_id, name, phone, normalized_phone, language, username, photo_file_id, status
         )
-        VALUES (?, ?, ?, ?, ?, ?, 'active')
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
         """,
-        (telegram_id, name, phone, normalize_phone(phone), username, photo_file_id),
+        (
+            telegram_id,
+            name,
+            phone,
+            normalize_phone(phone),
+            language,
+            username,
+            photo_file_id,
+        ),
     )
 
 
@@ -432,6 +456,15 @@ def update_user_username(telegram_id: int, username: Optional[str]):
         else "UPDATE users SET username = ? WHERE telegram_id = ?"
     )
     _execute(query, (username, telegram_id))
+
+
+def update_user_language(telegram_id: int, language: str):
+    query = (
+        "UPDATE users SET language = %s WHERE telegram_id = %s"
+        if IS_POSTGRES
+        else "UPDATE users SET language = ? WHERE telegram_id = ?"
+    )
+    _execute(query, (resolve_language(language), telegram_id))
 
 
 def set_user_status(telegram_id: int, status: str):

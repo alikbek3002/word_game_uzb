@@ -1,19 +1,23 @@
 from telegram import KeyboardButton, ReplyKeyboardMarkup
 
+from .i18n import button_text
 
-BTN_REGISTER = "✨ Зарегистрироваться"
-BTN_PLAY = "🔍 Найти участника"
-BTN_PROFILE = "👤 Мой профиль"
-BTN_SCORE = "🏆 Мой счёт"
-BTN_LEADERBOARD = "🥇 Лидеры"
-BTN_HELP = "❓ Помощь"
-BTN_EDIT_NAME = "✏️ Имя"
-BTN_EDIT_PHONE = "📱 Телефон"
-BTN_EDIT_PHOTO = "🖼 Фото"
-BTN_BACK = "⬅️ Назад"
-BTN_CANCEL = "❌ Отмена"
-BTN_SKIP = "🔄 Другой участник"
-BTN_SHARE_PHONE = "📲 Отправить мой номер"
+BTN_REGISTER = "register"
+BTN_PLAY = "play"
+BTN_PROFILE = "profile"
+BTN_SCORE = "score"
+BTN_LEADERBOARD = "leaderboard"
+BTN_HELP = "help"
+BTN_EDIT_NAME = "edit_name"
+BTN_EDIT_PHONE = "edit_phone"
+BTN_EDIT_PHOTO = "edit_photo"
+BTN_BACK = "back"
+BTN_CANCEL = "cancel"
+BTN_SKIP = "skip"
+BTN_SHARE_PHONE = "share_phone"
+BTN_LANGUAGE = "language"
+BTN_LANG_RU = "lang_ru"
+BTN_LANG_UZ = "lang_uz"
 BTN_ADMIN_STATS = "📊 Сводка"
 BTN_ADMIN_TOP10 = "🏆 Топ-10 лидеров"
 BTN_ADMIN_RECENT_FINDS = "🕒 Последние находки"
@@ -21,51 +25,76 @@ BTN_ADMIN_RECENT_USERS = "👥 Новые участники"
 BTN_ADMIN_BROADCAST = "📣 Рассылка всем"
 
 
-def guest_menu() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        [[BTN_REGISTER], [BTN_HELP]],
-        resize_keyboard=True,
-    )
-
-
-def main_menu() -> ReplyKeyboardMarkup:
+def guest_menu(language: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            [BTN_PLAY, BTN_PROFILE],
-            [BTN_SCORE, BTN_LEADERBOARD],
-            [BTN_HELP],
+            [button_text(BTN_REGISTER, language)],
+            [button_text(BTN_LANGUAGE, language), button_text(BTN_HELP, language)],
         ],
         resize_keyboard=True,
     )
 
 
-def profile_menu() -> ReplyKeyboardMarkup:
+def main_menu(language: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            [BTN_EDIT_NAME, BTN_EDIT_PHONE],
-            [BTN_EDIT_PHOTO, BTN_BACK],
+            [button_text(BTN_PLAY, language), button_text(BTN_PROFILE, language)],
+            [button_text(BTN_SCORE, language), button_text(BTN_LEADERBOARD, language)],
+            [button_text(BTN_LANGUAGE, language), button_text(BTN_HELP, language)],
         ],
         resize_keyboard=True,
     )
 
 
-def phone_request_menu() -> ReplyKeyboardMarkup:
+def profile_menu(language: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton(BTN_SHARE_PHONE, request_contact=True)],
-            [BTN_CANCEL],
+            [button_text(BTN_EDIT_NAME, language), button_text(BTN_EDIT_PHONE, language)],
+            [button_text(BTN_EDIT_PHOTO, language), button_text(BTN_BACK, language)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def phone_request_menu(language: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(button_text(BTN_SHARE_PHONE, language), request_contact=True)],
+            [button_text(BTN_CANCEL, language)],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
     )
 
 
-def photo_step_menu() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup([[BTN_CANCEL]], resize_keyboard=True, one_time_keyboard=True)
+def photo_step_menu(language: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[button_text(BTN_CANCEL, language)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
 
-def game_menu() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup([[BTN_SKIP, BTN_CANCEL]], resize_keyboard=True)
+def text_step_menu(language: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[button_text(BTN_LANGUAGE, language), button_text(BTN_CANCEL, language)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def game_menu(language: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[button_text(BTN_SKIP, language), button_text(BTN_CANCEL, language)]],
+        resize_keyboard=True,
+    )
+
+
+def language_menu(language: str, include_cancel: bool = False) -> ReplyKeyboardMarkup:
+    keyboard = [[button_text(BTN_LANG_RU, language), button_text(BTN_LANG_UZ, language)]]
+    if include_cancel:
+        keyboard.append([button_text(BTN_CANCEL, language)])
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
 
 def admin_menu() -> ReplyKeyboardMarkup:
