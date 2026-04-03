@@ -697,6 +697,50 @@ def get_recent_users(limit: int = 10) -> List[dict]:
     )
 
 
+def search_users_for_admin(query: str, limit: int = 10) -> List[dict]:
+    cleaned_query = (query or "").strip()
+    if not cleaned_query:
+        return []
+
+    if cleaned_query.isdigit():
+        exact_user = get_user(int(cleaned_query))
+        return [exact_user] if exact_user else []
+
+    needle = cleaned_query.lower().lstrip("@")
+    like_value = f"%{needle}%"
+
+    if IS_POSTGRES:
+        return _fetch_all(
+            """
+            SELECT telegram_id, name, username, score, status, registered_at
+            FROM users
+            WHERE LOWER(name) LIKE %s
+               OR LOWER(COALESCE(username, '')) LIKE %s
+            ORDER BY
+                CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+                registered_at DESC,
+                LOWER(name) ASC
+            LIMIT %s
+            """,
+            (like_value, like_value, limit),
+        )
+
+    return _fetch_all(
+        """
+        SELECT telegram_id, name, username, score, status, registered_at
+        FROM users
+        WHERE LOWER(name) LIKE ?
+           OR LOWER(COALESCE(username, '')) LIKE ?
+        ORDER BY
+            CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+            registered_at DESC,
+            name COLLATE NOCASE ASC
+        LIMIT ?
+        """,
+        (like_value, like_value, limit),
+    )
+
+
 def get_broadcast_recipients() -> List[int]:
     rows = _fetch_all(
         """
@@ -769,3 +813,67 @@ def get_admin_broadcast_recipients() -> List[int]:
         """
     )
     return [int(row["telegram_id"]) for row in rows]
+
+
+def delete_user_and_cleanup(telegram_id: int) -> Optional[dict]:
+    if IS_POSTGRES:
+        with _get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM users WHERE telegram_id = %s", (telegram_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+
+                deleted_user = dict(row)
+                cursor.execute(
+                    """
+                    DELETE FROM found
+                    WHERE finder_telegram_id = %s OR target_telegram_id = %s
+                    """,
+                    (telegram_id, telegram_id),
+                )
+                cursor.execute("DELETE FROM users WHERE telegram_id = %s", (telegram_id,))
+                cursor.execute("UPDATE users SET score = 0")
+                cursor.execute(
+                    """
+                    UPDATE users u
+                    SET score = src.score
+                    FROM (
+                        SELECT finder_telegram_id, COUNT(*)::int AS score
+                        FROM found
+                        GROUP BY finder_telegram_id
+                    ) AS src
+                    WHERE u.telegram_id = src.finder_telegram_id
+                    """
+                )
+        return deleted_user
+
+    with _get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE telegram_id = ?",
+            (telegram_id,),
+        ).fetchone()
+        if not row:
+            return None
+
+        deleted_user = dict(row)
+        conn.execute(
+            """
+            DELETE FROM found
+            WHERE finder_telegram_id = ? OR target_telegram_id = ?
+            """,
+            (telegram_id, telegram_id),
+        )
+        conn.execute("DELETE FROM users WHERE telegram_id = ?", (telegram_id,))
+        conn.execute("UPDATE users SET score = 0")
+        conn.execute(
+            """
+            UPDATE users
+            SET score = (
+                SELECT COUNT(*)
+                FROM found
+                WHERE finder_telegram_id = users.telegram_id
+            )
+            """
+        )
+    return deleted_user

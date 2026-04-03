@@ -23,6 +23,8 @@ BTN_ADMIN_TOP10 = "🏆 Топ-10 лидеров"
 BTN_ADMIN_RECENT_FINDS = "🕒 Последние находки"
 BTN_ADMIN_RECENT_USERS = "👥 Новые участники"
 BTN_ADMIN_BROADCAST = "📣 Рассылка всем"
+BTN_ADMIN_DELETE_USER = "🗑 Удалить пользователя"
+BTN_ADMIN_DELETE_CONFIRM = "✅ Удалить"
 
 
 def guest_menu(language: str) -> ReplyKeyboardMarkup:
@@ -102,7 +104,7 @@ def admin_menu() -> ReplyKeyboardMarkup:
         [
             [BTN_ADMIN_STATS, BTN_ADMIN_TOP10],
             [BTN_ADMIN_RECENT_FINDS, BTN_ADMIN_RECENT_USERS],
-            [BTN_ADMIN_BROADCAST],
+            [BTN_ADMIN_BROADCAST, BTN_ADMIN_DELETE_USER],
         ],
         resize_keyboard=True,
     )
@@ -111,6 +113,14 @@ def admin_menu() -> ReplyKeyboardMarkup:
 def admin_broadcast_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [[BTN_CANCEL]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def admin_delete_confirm_menu() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[BTN_ADMIN_DELETE_CONFIRM, BTN_CANCEL]],
         resize_keyboard=True,
         one_time_keyboard=True,
     )

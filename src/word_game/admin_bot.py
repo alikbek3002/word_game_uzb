@@ -27,6 +27,7 @@ from telegram.ext import (
 from .config import get_settings, require_token
 from .db import (
     acquire_worker_lock,
+    delete_user_and_cleanup,
     get_admin_stats,
     get_admin_broadcast_recipients,
     get_broadcast_recipients,
@@ -35,18 +36,22 @@ from .db import (
     get_recent_users,
     init_db,
     release_worker_lock,
+    search_users_for_admin,
     set_admin_subscriber_status,
     set_user_status,
     upsert_admin_subscriber,
 )
 from .keyboards import (
     BTN_ADMIN_BROADCAST,
+    BTN_ADMIN_DELETE_CONFIRM,
+    BTN_ADMIN_DELETE_USER,
     BTN_ADMIN_RECENT_FINDS,
     BTN_ADMIN_RECENT_USERS,
     BTN_ADMIN_STATS,
     BTN_ADMIN_TOP10,
     BTN_CANCEL,
     admin_broadcast_menu,
+    admin_delete_confirm_menu,
     admin_menu,
 )
 
@@ -56,9 +61,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 WAITING_BROADCAST_CONTENT = 1
+WAITING_DELETE_QUERY = 2
+WAITING_DELETE_CONFIRM = 3
 USER_DELIVERY_BOT_KEY = "user_delivery_bot"
 SETTINGS_KEY = "settings"
 ADMIN_LOCK_NAME = "word_game_admin_bot"
+DELETE_CANDIDATE_KEY = "delete_candidate_id"
 
 
 def build_broadcast_targets(settings) -> dict:
@@ -100,6 +108,7 @@ async def post_init(application: Application):
             BotCommand("recent", "Последние находки"),
             BotCommand("new_users", "Новые участники"),
             BotCommand("broadcast", "Сделать рассылку всем"),
+            BotCommand("delete_user", "Удалить пользователя"),
         ]
     )
 
@@ -380,6 +389,100 @@ async def new_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), reply_markup=admin_menu())
 
 
+def format_user_match(row: dict) -> str:
+    username = f"@{row['username']}" if row.get("username") else "без username"
+    return (
+        f"• ID: {row['telegram_id']} | {row['name']} | {username} | "
+        f"{row['score']} очк. | статус: {row['status']}"
+    )
+
+
+async def start_delete_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop(DELETE_CANDIDATE_KEY, None)
+    await update.message.reply_text(
+        "🗑 Режим удаления пользователя.\n\n"
+        "Пришли Telegram ID, @username или часть имени.\n"
+        "Я найду совпадения и попрошу подтвердить удаление.",
+        reply_markup=admin_broadcast_menu(),
+    )
+    return WAITING_DELETE_QUERY
+
+
+async def cancel_delete_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop(DELETE_CANDIDATE_KEY, None)
+    await update.message.reply_text(
+        "Удаление пользователя отменено.",
+        reply_markup=admin_menu(),
+    )
+    return ConversationHandler.END
+
+
+async def handle_delete_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.strip()
+    matches = search_users_for_admin(query, limit=10)
+
+    if not matches:
+        await update.message.reply_text(
+            "Ничего не нашёл.\n"
+            "Пришли другой ID, @username или часть имени, либо нажми «Отмена».",
+            reply_markup=admin_broadcast_menu(),
+        )
+        return WAITING_DELETE_QUERY
+
+    if len(matches) == 1:
+        user = matches[0]
+        context.user_data[DELETE_CANDIDATE_KEY] = int(user["telegram_id"])
+        await update.message.reply_text(
+            "Нашёл пользователя:\n\n"
+            f"{format_user_match(user)}\n\n"
+            "Если это он, нажми «Удалить». "
+            "Будут удалены сам пользователь и все связанные записи находок, а очки пересчитаются.",
+            reply_markup=admin_delete_confirm_menu(),
+        )
+        return WAITING_DELETE_CONFIRM
+
+    lines = ["Нашёл несколько совпадений. Пришли точный ID одного пользователя:\n"]
+    for row in matches:
+        lines.append(format_user_match(row))
+
+    await update.message.reply_text(
+        "\n".join(lines),
+        reply_markup=admin_broadcast_menu(),
+    )
+    return WAITING_DELETE_QUERY
+
+
+async def confirm_delete_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = context.user_data.get(DELETE_CANDIDATE_KEY)
+    if not telegram_id:
+        await update.message.reply_text(
+            "Кандидат на удаление не выбран. Начни заново.",
+            reply_markup=admin_menu(),
+        )
+        return ConversationHandler.END
+
+    deleted_user = delete_user_and_cleanup(int(telegram_id))
+    context.user_data.pop(DELETE_CANDIDATE_KEY, None)
+
+    if not deleted_user:
+        await update.message.reply_text(
+            "Пользователь уже не найден в базе.",
+            reply_markup=admin_menu(),
+        )
+        return ConversationHandler.END
+
+    username = f"@{deleted_user['username']}" if deleted_user.get("username") else "без username"
+    await update.message.reply_text(
+        "✅ Пользователь удалён.\n\n"
+        f"ID: {deleted_user['telegram_id']}\n"
+        f"Имя: {deleted_user['name']}\n"
+        f"Username: {username}\n\n"
+        "Связанные находки удалены, очки пересчитаны.",
+        reply_markup=admin_menu(),
+    )
+    return ConversationHandler.END
+
+
 async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings = context.application.bot_data[SETTINGS_KEY]
     plan = build_broadcast_targets(settings)
@@ -526,6 +629,8 @@ async def route_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await new_users(update, context)
     if text == BTN_ADMIN_BROADCAST:
         return await start_broadcast(update, context)
+    if text == BTN_ADMIN_DELETE_USER:
+        return await start_delete_user(update, context)
 
     await update.message.reply_text("Выбери действие из меню ниже.", reply_markup=admin_menu())
 
@@ -558,7 +663,30 @@ def build_application() -> Application:
         allow_reentry=True,
     )
 
+    delete_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("delete_user", start_delete_user),
+            MessageHandler(filters.Regex(f"^{re.escape(BTN_ADMIN_DELETE_USER)}$"), start_delete_user),
+        ],
+        states={
+            WAITING_DELETE_QUERY: [
+                MessageHandler(filters.Regex(f"^{re.escape(BTN_CANCEL)}$"), cancel_delete_user),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_delete_query),
+            ],
+            WAITING_DELETE_CONFIRM: [
+                MessageHandler(filters.Regex(f"^{re.escape(BTN_CANCEL)}$"), cancel_delete_user),
+                MessageHandler(
+                    filters.Regex(f"^{re.escape(BTN_ADMIN_DELETE_CONFIRM)}$"),
+                    confirm_delete_user,
+                ),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_delete_user)],
+        allow_reentry=True,
+    )
+
     application.add_handler(broadcast_handler)
+    application.add_handler(delete_handler)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("top10", top10))
