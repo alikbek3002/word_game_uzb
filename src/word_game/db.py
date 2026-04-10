@@ -1,3 +1,4 @@
+import contextlib
 import random
 import re
 import sqlite3
@@ -11,9 +12,11 @@ from .i18n import DEFAULT_LANGUAGE, resolve_language
 try:
     import psycopg
     from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
 except ImportError:  # pragma: no cover - optional locally until deps are installed
     psycopg = None
     dict_row = None
+    ConnectionPool = None
 
 
 SETTINGS = get_settings()
@@ -27,25 +30,40 @@ def normalize_phone(phone: str) -> str:
     return re.sub(r"\D", "", phone or "")
 
 
-def _get_sqlite_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+_PG_POOL: Optional[Any] = None
 
 
-def _get_postgres_connection():
-    if psycopg is None:
-        raise RuntimeError(
-            "Для работы с Postgres установи зависимости из requirements.txt "
-            "(нужен пакет psycopg[binary])."
-        )
-    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
-
-
+@contextlib.contextmanager
 def _get_connection():
+    """Provides a database connection with automatic transaction management.
+    Uses ConnectionPool for Postgres (up to 20 concurrent scaling) and WAL + high timeout for SQLite.
+    """
     if IS_POSTGRES:
-        return _get_postgres_connection()
-    return _get_sqlite_connection()
+        global _PG_POOL
+        if psycopg is None or ConnectionPool is None:
+            raise RuntimeError(
+                "Для работы с Postgres установи зависимости (нужны psycopg[binary] и psycopg_pool)."
+            )
+        if _PG_POOL is None:
+            _PG_POOL = ConnectionPool(
+                conninfo=DATABASE_URL,
+                min_size=2,
+                max_size=20,
+                kwargs={"row_factory": dict_row}
+            )
+        with _PG_POOL.connection() as conn:
+            with conn: # Начинает и коммитит транзакцию автоматически
+                yield conn
+    else:
+        # Для SQLite: timeout 20s и WAL mode предотвращают Database is locked при большом трафике
+        conn = sqlite3.connect(DB_PATH, timeout=20.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
 
 def _worker_lock_key(lock_name: str) -> int:
