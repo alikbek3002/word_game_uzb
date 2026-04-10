@@ -35,6 +35,7 @@ from .db import (
     get_leaderboard,
     get_recent_finds,
     get_recent_users,
+    get_referral_stats_for_admin,
     init_db,
     release_worker_lock,
     search_users_for_admin,
@@ -48,6 +49,7 @@ from .keyboards import (
     BTN_ADMIN_DELETE_USER,
     BTN_ADMIN_RECENT_FINDS,
     BTN_ADMIN_RECENT_USERS,
+    BTN_ADMIN_REFERRALS,
     BTN_ADMIN_STATS,
     BTN_ADMIN_TOP10,
     BTN_CANCEL,
@@ -108,6 +110,7 @@ async def post_init(application: Application):
             BotCommand("top10", "Топ-10 лидеров"),
             BotCommand("recent", "Последние находки"),
             BotCommand("new_users", "Новые участники"),
+            BotCommand("referrals", "Статистика приглашений"),
             BotCommand("broadcast", "Сделать рассылку всем"),
             BotCommand("delete_user", "Удалить пользователя"),
         ]
@@ -390,6 +393,42 @@ async def new_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), reply_markup=admin_menu())
 
 
+async def referrals(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    rows = get_referral_stats_for_admin()
+    if not rows:
+        await update.message.reply_text(
+            "👥 Пока никто не приглашал друзей.",
+            reply_markup=admin_menu(),
+        )
+        return
+
+    lines = ["👥 Статистика приглашений:\n"]
+    for index, row in enumerate(rows, start=1):
+        username = f"@{row['username']}" if row.get("username") else "без username"
+        lines.append(
+            f"{index}. {row['name']} ({username})\n"
+            f"   📞 {row['phone1']}, {row['phone2']}, {row['phone3']}\n"
+            f"   💰 +{row['bonus_awarded']} баллов — {row['created_at']}"
+        )
+
+    text = "\n".join(lines)
+    # Handle long messages
+    if len(text) > 4000:
+        chunks = []
+        current_chunk = lines[0] + "\n"
+        for line in lines[1:]:
+            if len(current_chunk) + len(line) + 1 > 3500:
+                chunks.append(current_chunk)
+                current_chunk = "👥 Статистика приглашений (продолжение):\n\n"
+            current_chunk += line + "\n"
+        if current_chunk:
+            chunks.append(current_chunk)
+        for chunk in chunks:
+            await update.message.reply_text(chunk.rstrip(), reply_markup=admin_menu())
+    else:
+        await update.message.reply_text(text, reply_markup=admin_menu())
+
+
 def format_user_match(row: dict) -> str:
     username = f"@{row['username']}" if row.get("username") else "без username"
     return (
@@ -668,6 +707,8 @@ async def route_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await start_broadcast(update, context)
     if text == BTN_ADMIN_DELETE_USER:
         return await start_delete_user(update, context)
+    if text == BTN_ADMIN_REFERRALS:
+        return await referrals(update, context)
 
     await update.message.reply_text("Выбери действие из меню ниже.", reply_markup=admin_menu())
 
@@ -737,6 +778,10 @@ def build_application() -> Application:
     application.add_handler(
         MessageHandler(filters.Regex(f"^{re.escape(BTN_ADMIN_RECENT_USERS)}$"), new_users)
     )
+    application.add_handler(
+        MessageHandler(filters.Regex(f"^{re.escape(BTN_ADMIN_REFERRALS)}$"), referrals)
+    )
+    application.add_handler(CommandHandler("referrals", referrals))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, route_buttons))
     application.add_error_handler(handle_error)
     return application

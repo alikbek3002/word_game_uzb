@@ -75,6 +75,10 @@ BUTTONS: Dict[str, Dict[str, str]] = {
         "ru": "🇺🇿 O'zbekcha",
         "uz": "🇺🇿 O'zbekcha",
     },
+    "invite_friends": {
+        "ru": "👥 Пригласить друзей",
+        "uz": "👥 Do'stlarni taklif qilish",
+    },
 }
 
 
@@ -98,7 +102,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "return_intro": "👋 С возвращением!",
         "registration_referral_intro": (
             "🎁 Бонус на старте!\n\n"
-            "Если порекомендуешь World Class 5 друзьям, получишь +5 баллов.\n"
+            "Если порекомендуешь World Class 3 друзьям, получишь +10 баллов.\n"
             "Можно заполнить позже, для продолжения нажми кнопку «Позже»."
         ),
         "registration_referral_retry": (
@@ -117,10 +121,41 @@ TEXTS: Dict[str, Dict[str, str]] = {
             "3. Бот показывает фото и имя человека.\n"
             "4. Находишь его вживую, узнаёшь номер и отправляешь в бот.\n\n"
             "Рекомендации друзей:\n"
-            "Напишите имена и номера телефонов своих трех друзей, кому вы порекомендуете World Class, и получите сразу +5 баллов.\n"
+            "Напишите номера телефонов своих трех друзей, кому вы порекомендуете World Class, и получите сразу +10 баллов.\n"
             "Этой рекомендацией можно воспользоваться только один раз.\n\n"
             "Команда /cancel отменяет текущий шаг."
         ),
+        "invite_friends_prompt": (
+            "👥 Пригласить друзей\n\n"
+            "Напишите номера телефонов 3 друзей, которым вы рекомендуете World Class.\n\n"
+            "📌 Правила:\n"
+            "• Напишите ВСЕ 3 номера в ОДНОМ сообщении\n"
+            "• Каждый номер с новой строки\n"
+            "• Формат: +998XXXXXXXXX (узбекский код)\n"
+            "• Все 3 номера должны быть разными\n"
+            "• Воспользоваться можно только ОДИН раз\n\n"
+            "✅ За приглашение вы получите сразу +10 баллов!\n\n"
+            "Пример:\n"
+            "+998901234567\n"
+            "+998937654321\n"
+            "+998991112233"
+        ),
+        "invite_friends_success": (
+            "🎉 Спасибо! Номера успешно сохранены.\n\n"
+            "✅ Вам начислено +10 баллов!\n"
+            "🏆 Ваш текущий счёт: {score}"
+        ),
+        "invite_friends_already_used": "❌ Вы уже воспользовались приглашением друзей. Эта функция доступна только один раз.",
+        "invite_friends_invalid_format": (
+            "❌ Неверный формат. Пожалуйста, отправьте ровно 3 номера в одном сообщении.\n\n"
+            "Каждый номер с новой строки, формат: +998XXXXXXXXX\n\n"
+            "Пример:\n"
+            "+998901234567\n"
+            "+998937654321\n"
+            "+998991112233"
+        ),
+        "invite_friends_duplicate_numbers": "❌ Все 3 номера должны быть разными. Пожалуйста, проверьте и отправьте заново.",
+        "invite_friends_cancelled": "Приглашение друзей отменено.",
         "invalid_name": "Напиши имя длиной от 2 до 40 символов. Желательно без цифр и лишних знаков.",
         "ask_phone": (
             "📱 Теперь отправь свой номер.\n"
@@ -199,6 +234,12 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "idle_guest": "Сейчас нет активного шага регистрации.",
         "unknown_registered": "Я не понял это сообщение. Выбери действие из меню ниже.",
         "unknown_guest": "Я не понял это сообщение. Нажми «Зарегистрироваться», и начнём.",
+        "invite_after_registration": (
+            "🎁 Хотите сразу получить +10 баллов?\n\n"
+            "Пригласите 3 друзей в World Class! Напишите их номера телефонов "
+            "(формат: +998XXXXXXXXX), по одному на строке, в одном сообщении.\n\n"
+            "Если не сейчас, нажмите «Позже» — кнопка будет в меню."
+        ),
     },
     "uz": {
         "choose_language": (
@@ -219,7 +260,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "return_intro": "👋 Yana ko'rganimdan xursandman!",
         "registration_referral_intro": (
             "🎁 Boshlanish bonus!\n\n"
-            "Agar World Class'ni 5 nafar do'stingizga tavsiya qilsangiz, +5 ball olasiz.\n"
+            "Agar World Class'ni 3 nafar do'stingizga tavsiya qilsangiz, +10 ball olasiz.\n"
             "Buni keyinroq ham to'ldirishingiz mumkin, davom etish uchun «Keyinroq» tugmasini bosing."
         ),
         "registration_referral_retry": (
@@ -237,6 +278,9 @@ TEXTS: Dict[str, Dict[str, str]] = {
             "2. «Ishtirokchini topish» tugmasini bosasiz.\n"
             "3. Bot odamning fotosi va ismini ko'rsatadi.\n"
             "4. Uni tadbirda topasiz, raqamini bilib olasiz va botga yuborasiz.\n\n"
+            "Do'stlarni tavsiya qilish:\n"
+            "3 nafar do'stingizning telefon raqamlarini yozing va darhol +10 ball oling.\n"
+            "Bu tavsiyadan faqat bir marta foydalanish mumkin.\n\n"
             "/cancel buyrug'i joriy bosqichni bekor qiladi."
         ),
         "invalid_name": "2 tadan 40 tagacha belgidan iborat ism yuboring. Iloji bo'lsa, raqam va ortiqcha belgilar ishlatmang.",
@@ -317,6 +361,43 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "idle_guest": "Hozir ro'yxatdan o'tishning faol bosqichi yo'q.",
         "unknown_registered": "Bu xabar tushunarsiz bo'ldi. Pastdagi menyudan amalni tanlang.",
         "unknown_guest": "Bu xabar tushunarsiz bo'ldi. «Ro'yxatdan o'tish» tugmasini bosing va boshlaymiz.",
+        "invite_friends_prompt": (
+            "👥 Do'stlarni taklif qilish\n\n"
+            "World Class'ni tavsiya qilmoqchi bo'lgan 3 do'stingizning telefon raqamlarini yozing.\n\n"
+            "📌 Qoidalar:\n"
+            "• BARCHA 3 raqamni BITTA xabarda yozing\n"
+            "• Har bir raqam yangi qatordan\n"
+            "• Format: +998XXXXXXXXX (O'zbekiston kodi)\n"
+            "• Barcha 3 raqam turli bo'lishi kerak\n"
+            "• Faqat BIR MARTA foydalanish mumkin\n\n"
+            "✅ Taklif uchun siz darhol +10 ball olasiz!\n\n"
+            "Misol:\n"
+            "+998901234567\n"
+            "+998937654321\n"
+            "+998991112233"
+        ),
+        "invite_friends_success": (
+            "🎉 Rahmat! Raqamlar muvaffaqiyatli saqlandi.\n\n"
+            "✅ Sizga +10 ball berildi!\n"
+            "🏆 Joriy hisobingiz: {score}"
+        ),
+        "invite_friends_already_used": "❌ Siz allaqachon do'stlarni taklif qilish imkoniyatidan foydalangansiz. Bu funksiya faqat bir marta ishlaydi.",
+        "invite_friends_invalid_format": (
+            "❌ Noto'g'ri format. Iltimos, bitta xabarda aynan 3 raqam yuboring.\n\n"
+            "Har bir raqam yangi qatordan, format: +998XXXXXXXXX\n\n"
+            "Misol:\n"
+            "+998901234567\n"
+            "+998937654321\n"
+            "+998991112233"
+        ),
+        "invite_friends_duplicate_numbers": "❌ Barcha 3 raqam turli bo'lishi kerak. Iltimos, tekshiring va qayta yuboring.",
+        "invite_friends_cancelled": "Do'stlarni taklif qilish bekor qilindi.",
+        "invite_after_registration": (
+            "🎁 Darhol +10 ball olmoqchimisiz?\n\n"
+            "3 nafar do'stingizni World Class'ga taklif qiling! Ularning telefon raqamlarini yozing "
+            "(format: +998XXXXXXXXX), har biri yangi qatordan, bitta xabarda.\n\n"
+            "Agar hozir emas, «Keyinroq» tugmasini bosing — tugma menyuda bo'ladi."
+        ),
     },
 }
 

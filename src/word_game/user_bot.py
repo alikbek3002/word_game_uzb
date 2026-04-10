@@ -28,11 +28,13 @@ from .db import (
     get_progress,
     get_random_target,
     get_user,
+    has_referrals,
     init_db,
     normalize_phone,
     record_found,
     release_worker_lock,
     register_user,
+    save_referrals,
     update_user_name,
     update_user_language,
     update_user_phone,
@@ -47,6 +49,7 @@ from .keyboards import (
     BTN_EDIT_PHONE,
     BTN_EDIT_PHOTO,
     BTN_HELP,
+    BTN_INVITE_FRIENDS,
     BTN_LANGUAGE,
     BTN_LANG_RU,
     BTN_LANG_UZ,
@@ -59,6 +62,8 @@ from .keyboards import (
     BTN_SHARE_PHONE,
     game_menu,
     guest_menu,
+    invite_after_reg_menu,
+    invite_step_menu,
     language_menu,
     main_menu,
     phone_request_menu,
@@ -73,7 +78,7 @@ logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-CHOOSE_LANGUAGE, ASK_REFERRAL, ASK_NAME, ASK_PHONE, ASK_PHOTO, WAITING_PHONE_GUESS, EDIT_NAME, EDIT_PHONE, EDIT_PHOTO = range(9)
+CHOOSE_LANGUAGE, ASK_REFERRAL, ASK_NAME, ASK_PHONE, ASK_PHOTO, WAITING_PHONE_GUESS, EDIT_NAME, EDIT_PHONE, EDIT_PHOTO, ASK_INVITE_PHONES, ASK_INVITE_AFTER_REG = range(11)
 USER_LOCK_NAME = "word_game_user_bot"
 LANGUAGE_NEXT_STEP_KEY = "language_next_step"
 NAVIGATION_BUTTON_FILTER = (
@@ -83,6 +88,7 @@ NAVIGATION_BUTTON_FILTER = (
     | filters.Regex(button_pattern(BTN_SCORE))
     | filters.Regex(button_pattern(BTN_HELP))
     | filters.Regex(button_pattern(BTN_BACK))
+    | filters.Regex(button_pattern(BTN_INVITE_FRIENDS))
 )
 
 
@@ -96,6 +102,12 @@ def validate_name(name: str) -> bool:
 def validate_phone(phone: str) -> bool:
     digits = normalize_phone(phone)
     return 7 <= len(digits) <= 15
+
+
+def validate_uz_phone(phone: str) -> bool:
+    """Validate an Uzbek phone number: must start with +998 and have 12 digits total."""
+    digits = normalize_phone(phone)
+    return digits.startswith("998") and len(digits) == 12
 
 
 def mask_phone(phone: str) -> str:
@@ -145,6 +157,12 @@ def home_text(language: str, user: dict, progress: dict) -> str:
         total_targets=progress["total_targets"],
         remaining_count=progress["remaining_count"],
     )
+
+
+def _get_main_menu(language: str, telegram_id: int) -> "ReplyKeyboardMarkup":
+    """Return main_menu with invite button shown only if user hasn't used it yet."""
+    show_invite = not has_referrals(telegram_id)
+    return main_menu(language, show_invite=show_invite)
 
 
 def leaderboard_text(language: str, limit: int = 10) -> str:
@@ -293,7 +311,7 @@ async def send_registered_home(
     text = home_text(language, user, progress)
     if intro:
         text = f"{intro}\n\n{text}"
-    await update.message.reply_text(text, reply_markup=main_menu(language))
+    await update.message.reply_text(text, reply_markup=_get_main_menu(language, update.effective_user.id))
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -337,7 +355,7 @@ async def ask_referral_choice(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
     language = get_current_language(context, user)
-    reply_markup = main_menu(language) if user else guest_menu(language)
+    reply_markup = _get_main_menu(language, update.effective_user.id) if user else guest_menu(language)
     await update.message.reply_text(
         t(language, "help_text"),
         reply_markup=reply_markup,
@@ -403,10 +421,14 @@ async def ask_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["lang"] = language
     await update.message.reply_text(
         t(language, "profile_created"),
-        reply_markup=main_menu(language),
+        reply_markup=_get_main_menu(language, update.effective_user.id),
     )
-    await send_registered_home(update, context)
-    return ConversationHandler.END
+    # Offer invite friends right after registration
+    await update.message.reply_text(
+        t(language, "invite_after_registration"),
+        reply_markup=invite_after_reg_menu(language),
+    )
+    return ASK_INVITE_AFTER_REG
 
 
 async def cancel_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -417,7 +439,7 @@ async def cancel_registration(update: Update, context: ContextTypes.DEFAULT_TYPE
     if user:
         await update.message.reply_text(
             t(language, "cancel_registered"),
-            reply_markup=main_menu(language),
+            reply_markup=_get_main_menu(language, update.effective_user.id),
         )
     else:
         await update.message.reply_text(
@@ -477,14 +499,14 @@ async def score(update: Update, context: ContextTypes.DEFAULT_TYPE):
             total_targets=progress["total_targets"],
             remaining_count=progress["remaining_count"],
         ),
-        reply_markup=main_menu(language),
+        reply_markup=_get_main_menu(language, update.effective_user.id),
     )
 
 
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
     language = get_current_language(context, user)
-    reply_markup = main_menu(language) if user else guest_menu(language)
+    reply_markup = _get_main_menu(language, update.effective_user.id) if user else guest_menu(language)
     await update.message.reply_text(leaderboard_text(language, limit=10), reply_markup=reply_markup)
 
 
@@ -496,7 +518,7 @@ async def present_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if progress["total_targets"] == 0:
         await update.message.reply_text(
             t(language, "no_targets"),
-            reply_markup=main_menu(language),
+            reply_markup=_get_main_menu(language, finder_id),
         )
         return ConversationHandler.END
 
@@ -510,7 +532,7 @@ async def present_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clear_game_state(context)
         await update.message.reply_text(
             t(language, "all_found"),
-            reply_markup=main_menu(language),
+            reply_markup=_get_main_menu(language, finder_id),
         )
         return ConversationHandler.END
 
@@ -564,7 +586,7 @@ async def check_phone_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clear_game_state(context)
         await update.message.reply_text(
             t(language, "session_lost"),
-            reply_markup=main_menu(language),
+            reply_markup=_get_main_menu(language, update.effective_user.id),
         )
         return ConversationHandler.END
 
@@ -583,7 +605,7 @@ async def check_phone_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 score=user["score"] if user else 0,
                 remaining_count=progress["remaining_count"],
             ),
-            reply_markup=main_menu(language),
+            reply_markup=_get_main_menu(language, update.effective_user.id),
         )
         return ConversationHandler.END
 
@@ -609,7 +631,7 @@ async def cancel_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_game_state(context)
     await update.message.reply_text(
         t(language, "guess_cancelled"),
-        reply_markup=main_menu(language),
+        reply_markup=_get_main_menu(language, update.effective_user.id),
     )
     return ConversationHandler.END
 
@@ -758,6 +780,8 @@ async def route_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return await help_command(update, context)
     if button_matches(text, BTN_LANGUAGE):
         return await start_language_selection(update, context)
+    if button_matches(text, BTN_INVITE_FRIENDS):
+        return await start_invite_friends(update, context)
     if button_matches(text, BTN_BACK):
         return await back_to_menu(update, context)
     if button_matches(text, BTN_CANCEL):
@@ -766,7 +790,7 @@ async def route_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if user:
             await update.message.reply_text(
                 t(language, "idle_registered"),
-                reply_markup=main_menu(language),
+                reply_markup=_get_main_menu(language, update.effective_user.id),
             )
         else:
             await update.message.reply_text(
@@ -780,7 +804,7 @@ async def route_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if user:
         await update.message.reply_text(
             t(language, "unknown_registered"),
-            reply_markup=main_menu(language),
+            reply_markup=_get_main_menu(language, update.effective_user.id),
         )
     else:
         if not normalize_language(context.user_data.get("lang")):
@@ -790,6 +814,152 @@ async def route_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE)
             t(language, "unknown_guest"),
             reply_markup=guest_menu(language),
         )
+
+
+async def start_invite_friends(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for invite friends from main menu button."""
+    user = get_user(update.effective_user.id)
+    if not user:
+        language = get_current_language(context)
+        await update.message.reply_text(
+            t(language, "register_first"),
+            reply_markup=guest_menu(language),
+        )
+        return ConversationHandler.END
+
+    language = get_current_language(context, user)
+    if has_referrals(update.effective_user.id):
+        await update.message.reply_text(
+            t(language, "invite_friends_already_used"),
+            reply_markup=_get_main_menu(language, update.effective_user.id),
+        )
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        t(language, "invite_friends_prompt"),
+        reply_markup=invite_step_menu(language),
+    )
+    return ASK_INVITE_PHONES
+
+
+async def handle_invite_phones(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process 3 phone numbers sent in one message for invite friends."""
+    language = get_current_language(context)
+    telegram_id = update.effective_user.id
+
+    # Check if already used
+    if has_referrals(telegram_id):
+        await update.message.reply_text(
+            t(language, "invite_friends_already_used"),
+            reply_markup=_get_main_menu(language, telegram_id),
+        )
+        return ConversationHandler.END
+
+    text = update.message.text.strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    if len(lines) != 3:
+        await update.message.reply_text(
+            t(language, "invite_friends_invalid_format"),
+            reply_markup=invite_step_menu(language),
+        )
+        return ASK_INVITE_PHONES
+
+    # Validate each phone
+    phones = []
+    for line in lines:
+        if not validate_uz_phone(line):
+            await update.message.reply_text(
+                t(language, "invite_friends_invalid_format"),
+                reply_markup=invite_step_menu(language),
+            )
+            return ASK_INVITE_PHONES
+        phones.append(normalize_phone(line))
+
+    # Check for duplicates
+    if len(set(phones)) != 3:
+        await update.message.reply_text(
+            t(language, "invite_friends_duplicate_numbers"),
+            reply_markup=invite_step_menu(language),
+        )
+        return ASK_INVITE_PHONES
+
+    # Save referrals and award bonus
+    save_referrals(
+        telegram_id=telegram_id,
+        phone1=phones[0],
+        phone2=phones[1],
+        phone3=phones[2],
+        bonus=10,
+    )
+
+    user = get_user(telegram_id)
+    await update.message.reply_text(
+        t(language, "invite_friends_success", score=user["score"] if user else 10),
+        reply_markup=_get_main_menu(language, telegram_id),
+    )
+    return ConversationHandler.END
+
+
+async def cancel_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    language = get_current_language(context)
+    await update.message.reply_text(
+        t(language, "invite_friends_cancelled"),
+        reply_markup=_get_main_menu(language, update.effective_user.id),
+    )
+    return ConversationHandler.END
+
+
+async def handle_invite_after_reg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the invite-after-registration step: user can enter phones or press Later."""
+    language = get_current_language(context)
+    text = update.message.text.strip()
+
+    if button_matches(text, BTN_LATER):
+        await send_registered_home(update, context)
+        return ConversationHandler.END
+
+    # Try to process as phone numbers
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) != 3:
+        await update.message.reply_text(
+            t(language, "invite_friends_invalid_format"),
+            reply_markup=invite_after_reg_menu(language),
+        )
+        return ASK_INVITE_AFTER_REG
+
+    phones = []
+    for line in lines:
+        if not validate_uz_phone(line):
+            await update.message.reply_text(
+                t(language, "invite_friends_invalid_format"),
+                reply_markup=invite_after_reg_menu(language),
+            )
+            return ASK_INVITE_AFTER_REG
+        phones.append(normalize_phone(line))
+
+    if len(set(phones)) != 3:
+        await update.message.reply_text(
+            t(language, "invite_friends_duplicate_numbers"),
+            reply_markup=invite_after_reg_menu(language),
+        )
+        return ASK_INVITE_AFTER_REG
+
+    telegram_id = update.effective_user.id
+    save_referrals(
+        telegram_id=telegram_id,
+        phone1=phones[0],
+        phone2=phones[1],
+        phone3=phones[2],
+        bonus=10,
+    )
+
+    user = get_user(telegram_id)
+    await update.message.reply_text(
+        t(language, "invite_friends_success", score=user["score"] if user else 10),
+        reply_markup=_get_main_menu(language, telegram_id),
+    )
+    return ConversationHandler.END
 
 
 def build_application() -> Application:
@@ -825,6 +995,11 @@ def build_application() -> Application:
                 MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
                 MessageHandler(filters.PHOTO, ask_photo),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ask_photo),
+            ],
+            ASK_INVITE_AFTER_REG: [
+                MessageHandler(filters.Regex(button_pattern(BTN_LATER)), handle_invite_after_reg),
+                MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_invite),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_invite_after_reg),
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel_registration)],
@@ -878,9 +1053,24 @@ def build_application() -> Application:
         allow_reentry=True,
     )
 
+    invite_handler = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex(button_pattern(BTN_INVITE_FRIENDS)), start_invite_friends),
+        ],
+        states={
+            ASK_INVITE_PHONES: [
+                MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_invite),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_invite_phones),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_invite)],
+        allow_reentry=True,
+    )
+
     application.add_handler(registration_handler)
     application.add_handler(game_handler)
     application.add_handler(edit_handler)
+    application.add_handler(invite_handler)
     application.add_handler(CommandHandler("profile", profile))
     application.add_handler(CommandHandler("score", score))
     application.add_handler(CommandHandler("help", help_command))

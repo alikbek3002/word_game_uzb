@@ -244,6 +244,19 @@ def init_db():
             )
             """
         )
+        _execute(
+            """
+            CREATE TABLE IF NOT EXISTS referrals (
+                id SERIAL PRIMARY KEY,
+                inviter_telegram_id BIGINT NOT NULL,
+                phone1 TEXT NOT NULL,
+                phone2 TEXT NOT NULL,
+                phone3 TEXT NOT NULL,
+                bonus_awarded INTEGER DEFAULT 10,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
     else:
         _execute(
             """
@@ -281,6 +294,19 @@ def init_db():
                 status TEXT DEFAULT 'active',
                 joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        _execute(
+            """
+            CREATE TABLE IF NOT EXISTS referrals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                inviter_telegram_id INTEGER NOT NULL,
+                phone1 TEXT NOT NULL,
+                phone2 TEXT NOT NULL,
+                phone3 TEXT NOT NULL,
+                bonus_awarded INTEGER DEFAULT 10,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -919,3 +945,87 @@ def delete_user_and_cleanup(telegram_id: int) -> Optional[dict]:
             """
         )
     return deleted_user
+
+
+def has_referrals(telegram_id: int) -> bool:
+    query = (
+        "SELECT COUNT(*) FROM referrals WHERE inviter_telegram_id = %s"
+        if IS_POSTGRES
+        else "SELECT COUNT(*) FROM referrals WHERE inviter_telegram_id = ?"
+    )
+    count = int(_fetch_value(query, (telegram_id,)) or 0)
+    return count > 0
+
+
+def save_referrals(
+    telegram_id: int,
+    phone1: str,
+    phone2: str,
+    phone3: str,
+    bonus: int = 10,
+):
+    if IS_POSTGRES:
+        with _get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO referrals (inviter_telegram_id, phone1, phone2, phone3, bonus_awarded)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (telegram_id, phone1, phone2, phone3, bonus),
+                )
+                cursor.execute(
+                    "UPDATE users SET score = score + %s WHERE telegram_id = %s",
+                    (bonus, telegram_id),
+                )
+        return
+
+    with _get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO referrals (inviter_telegram_id, phone1, phone2, phone3, bonus_awarded)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (telegram_id, phone1, phone2, phone3, bonus),
+        )
+        conn.execute(
+            "UPDATE users SET score = score + ? WHERE telegram_id = ?",
+            (bonus, telegram_id),
+        )
+
+
+def get_referral_stats_for_admin() -> List[dict]:
+    if IS_POSTGRES:
+        return _fetch_all(
+            """
+            SELECT
+                u.name,
+                u.username,
+                u.telegram_id,
+                r.phone1,
+                r.phone2,
+                r.phone3,
+                r.bonus_awarded,
+                r.created_at
+            FROM referrals r
+            JOIN users u ON u.telegram_id = r.inviter_telegram_id
+            ORDER BY r.created_at DESC
+            """
+        )
+
+    return _fetch_all(
+        """
+        SELECT
+            u.name,
+            u.username,
+            u.telegram_id,
+            r.phone1,
+            r.phone2,
+            r.phone3,
+            r.bonus_awarded,
+            r.created_at
+        FROM referrals r
+        JOIN users u ON u.telegram_id = r.inviter_telegram_id
+        ORDER BY r.created_at DESC
+        """
+    )
