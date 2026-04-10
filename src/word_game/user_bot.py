@@ -796,6 +796,8 @@ async def route_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return await help_command(update, context)
     if button_matches(text, BTN_LANGUAGE):
         return await start_language_selection(update, context)
+    if (button_matches(text, BTN_LANG_RU) or button_matches(text, BTN_LANG_UZ)) and context.user_data.get(LANGUAGE_NEXT_STEP_KEY):
+        return await choose_language(update, context)
     if button_matches(text, BTN_INVITE_FRIENDS):
         return await start_invite_friends(update, context)
     if button_matches(text, BTN_BACK):
