@@ -463,19 +463,27 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sync_username(update, user)
     progress = get_progress(update.effective_user.id)
     username = f"@{user['username']}" if user.get("username") else t(language, "username_missing")
-    await update.message.reply_photo(
-        photo=user["photo_file_id"],
-        caption=t(
-            language,
-            "profile_text",
-            name=user["name"],
-            username=username,
-            phone=user["phone"],
-            score=user["score"],
-            found_count=progress["found_count"],
-        ),
-        reply_markup=profile_menu(language),
+    caption = t(
+        language,
+        "profile_text",
+        name=user["name"],
+        username=username,
+        phone=user["phone"],
+        score=user["score"],
+        found_count=progress["found_count"],
     )
+    try:
+        await update.message.reply_photo(
+            photo=user["photo_file_id"],
+            caption=caption,
+            reply_markup=profile_menu(language),
+        )
+    except Exception:
+        logger.warning("Не удалось отправить фото профиля %s, отправляю текст.", update.effective_user.id)
+        await update.message.reply_text(
+            caption,
+            reply_markup=profile_menu(language),
+        )
 
 
 async def score(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -542,17 +550,25 @@ async def present_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["current_target_phone"] = target["normalized_phone"] or normalize_phone(target["phone"])
     context.user_data["guess_attempts"] = 0
 
-    await update.message.reply_photo(
-        photo=target["photo_file_id"],
-        caption=t(
-            language,
-            "target_caption",
-            name=target["name"],
-            found_count=progress["found_count"],
-            total_targets=progress["total_targets"],
-        ),
-        reply_markup=game_menu(language),
+    caption = t(
+        language,
+        "target_caption",
+        name=target["name"],
+        found_count=progress["found_count"],
+        total_targets=progress["total_targets"],
     )
+    try:
+        await update.message.reply_photo(
+            photo=target["photo_file_id"],
+            caption=caption,
+            reply_markup=game_menu(language),
+        )
+    except Exception:
+        logger.warning("Не удалось отправить фото цели %s, отправляю текст.", target["telegram_id"])
+        await update.message.reply_text(
+            caption,
+            reply_markup=game_menu(language),
+        )
     return WAITING_PHONE_GUESS
 
 
