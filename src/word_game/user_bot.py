@@ -257,10 +257,10 @@ async def choose_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reset_user_state(context)
         context.user_data["lang"] = language
         await update.message.reply_text(
-            t(language, "registration_referral_intro"),
-            reply_markup=registration_offer_menu(language),
+            t(language, "registration_intro"),
+            reply_markup=text_step_menu(language),
         )
-        return ASK_REFERRAL
+        return ASK_NAME
 
     if user:
         await send_registered_home(update, context, intro=t(language, "choose_language_updated"))
@@ -328,10 +328,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_user_state(context)
     context.user_data["lang"] = language
     await update.message.reply_text(
-        t(language, "registration_referral_intro"),
-        reply_markup=registration_offer_menu(language),
+        t(language, "registration_intro"),
+        reply_markup=text_step_menu(language),
     )
-    return ASK_REFERRAL
+    return ASK_NAME
 
 
 async def ask_referral_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -977,10 +977,7 @@ def build_application() -> Application:
             CHOOSE_LANGUAGE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, choose_language),
             ],
-            ASK_REFERRAL: [
-                MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, ask_referral_choice),
-            ],
+
             ASK_NAME: [
                 MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_registration),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name),
@@ -999,6 +996,7 @@ def build_application() -> Application:
             ASK_INVITE_AFTER_REG: [
                 MessageHandler(filters.Regex(button_pattern(BTN_LATER)), handle_invite_after_reg),
                 MessageHandler(filters.Regex(button_pattern(BTN_CANCEL)), cancel_invite),
+                MessageHandler(NAVIGATION_BUTTON_FILTER, handle_navigation_during_guess),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_invite_after_reg),
             ],
         },
