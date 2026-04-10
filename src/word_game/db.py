@@ -59,6 +59,9 @@ def _get_connection():
         conn = sqlite3.connect(DB_PATH, timeout=20.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA temp_store=MEMORY;")
+        conn.execute("PRAGMA mmap_size=268435456;")
         try:
             with conn:
                 yield conn
@@ -380,6 +383,9 @@ def init_db():
             ON admin_subscribers(status, joined_at ASC)
             """
         )
+        _execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)")
+        _execute("CREATE INDEX IF NOT EXISTS idx_referrals_inviter ON referrals(inviter_telegram_id)")
+        _execute("CREATE INDEX IF NOT EXISTS idx_found_target ON found(target_telegram_id)")
         return
 
     rows = _fetch_all("SELECT telegram_id, phone, normalized_phone, language, status FROM users")
@@ -419,6 +425,9 @@ def init_db():
         ON admin_subscribers(status, joined_at ASC)
         """
     )
+    _execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)")
+    _execute("CREATE INDEX IF NOT EXISTS idx_referrals_inviter ON referrals(inviter_telegram_id)")
+    _execute("CREATE INDEX IF NOT EXISTS idx_found_target ON found(target_telegram_id)")
 
 
 def get_user(telegram_id: int) -> Optional[dict]:
@@ -594,7 +603,8 @@ def get_random_target(finder_id: int, excluded_ids: Optional[List[int]] = None) 
             placeholders = ", ".join(["%s"] * len(excluded_ids))
             query += f" AND telegram_id NOT IN ({placeholders})"
             params.extend(excluded_ids)
-        rows = _fetch_all(query, tuple(params))
+        query += " ORDER BY RANDOM() LIMIT 1"
+        row = _fetch_one(query, tuple(params))
     else:
         query = """
             SELECT *
@@ -612,11 +622,12 @@ def get_random_target(finder_id: int, excluded_ids: Optional[List[int]] = None) 
             placeholders = ", ".join(["?"] * len(excluded_ids))
             query += f" AND telegram_id NOT IN ({placeholders})"
             params.extend(excluded_ids)
-        rows = _fetch_all(query, tuple(params))
+        query += " ORDER BY RANDOM() LIMIT 1"
+        row = _fetch_one(query, tuple(params))
 
-    if not rows:
+    if not row:
         return None
-    return dict(random.choice(rows))
+    return dict(row)
 
 
 def record_found(finder_id: int, target_id: int) -> bool:
